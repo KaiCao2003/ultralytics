@@ -1,0 +1,7 @@
+# Local mouse detection dataset reused from the YOLOv5 workspace.
+path: /Users/vxf1610/developer/yolov5/data/train/dataset/mouse_1909
+train: images/train
+val: images/val
+
+names:
+  0: mouse
