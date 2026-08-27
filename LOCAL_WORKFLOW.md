@@ -49,13 +49,12 @@ The wrappers map the old layout to the current API:
 # Extract one frame per second with OpenCV; each video gets its own output folder
 python extract.py /path/to/videos --output data/frames --fps 1
 
-# Preview a deterministic 80/20 split, then copy it into images/{train,val} and labels/{train,val}
-python pick_val.py /path/to/flat_dataset --val-ratio 0.2 --dry-run
-python pick_val.py /path/to/flat_dataset --val-ratio 0.2
+# Edit SOURCE, DESTINATION, and AMOUNT in pick_val.py, then copy a random JPG subset
+python pick_val.py
 ```
 
-`pick_val.py` copies by default. Add `--move` only when the flat originals should be relocated. Existing destination
-files are protected unless `--overwrite` is passed.
+YOLO detection still requires a separate `val` entry; `test` is optional. `pick_val.py` only copies the requested
+random JPGs and does not create dataset splits.
 
 ## Layout and updates
 
