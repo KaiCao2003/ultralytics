@@ -1,20 +1,20 @@
-import cv2
-import pandas as pd
-import numpy as np
 from pathlib import Path
-from tqdm import tqdm
 
+import cv2
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
 file_list = [
     (
         "data/videos/bright.avi",
-        "runs/pose/bright_pose_ccw.csv",
-        "runs/pose/bright_hd_ccw.avi",
+        "runs/pose/bright_pose.csv",
+        "runs/pose/bright_hd.avi",
     ),
     (
         "data/videos/dark.avi",
-        "runs/pose/dark_pose_ccw.csv",
-        "runs/pose/dark_hd_ccw.avi",
+        "runs/pose/dark_pose.csv",
+        "runs/pose/dark_hd.avi",
     ),
 ]
 
@@ -41,11 +41,7 @@ for video_path, csv_path, output_path in file_list:
         (width, height),
     )
 
-    for frame_idx in tqdm(
-        range(total_frames),
-        desc=Path(video_path).name,
-        unit="frame"
-    ):
+    for frame_idx in tqdm(range(total_frames), desc=Path(video_path).name, unit="frame"):
         ok, frame = cap.read()
 
         if not ok:
@@ -67,13 +63,13 @@ for video_path, csv_path, output_path in file_list:
                 dy = -ARROW_LENGTH * np.cos(theta)
 
                 start = (
-                    int(round(cx)),
-                    int(round(cy)),
+                    round(cx),
+                    round(cy),
                 )
 
                 end = (
-                    int(round(cx + dx)),
-                    int(round(cy + dy)),
+                    round(cx + dx),
+                    round(cy + dy),
                 )
 
                 cv2.arrowedLine(
