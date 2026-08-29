@@ -29,7 +29,7 @@ model = YOLO(MODEL_PATH)
 for video_path, csv_path, position_path, json_path in file_list:
     print(f"Processing: {video_path}")
 
-    results = model.predict(
+    results = model.track(
         source=video_path,
         conf=0.5,
         imgsz=1024,
@@ -43,6 +43,7 @@ for video_path, csv_path, position_path, json_path in file_list:
     json_frames = []
     json_hd = []
     last_pose = [None] * 7
+    target_id = None
 
     with open(csv_path, "w", newline="") as f, open(position_path, "w", newline="") as position_file:
         writer = csv.writer(f)
@@ -58,10 +59,11 @@ for video_path, csv_path, position_path, json_path in file_list:
                 "back_x",
                 "back_y",
                 "hd_deg",
+                "track_id",
                 "det_conf",
             ]
         )
-        position_writer.writerow(["frame", "center_x", "center_y", "det_conf"])
+        position_writer.writerow(["frame", "center_x", "center_y", "track_id", "det_conf"])
 
         for frame_idx, r in enumerate(results):
             det_conf = np.nan
@@ -69,14 +71,20 @@ for video_path, csv_path, position_path, json_path in file_list:
             if len(r.boxes):
                 confs = r.boxes.conf.cpu().numpy()
                 best_idx = int(np.argmax(confs))
+                track_ids = r.boxes.id.int().cpu().numpy()
+
+                if target_id in track_ids:
+                    best_idx = int(np.flatnonzero(track_ids == target_id)[0])
+
+                target_id = int(track_ids[best_idx])
                 front, back = r.keypoints.xy[best_idx].cpu().numpy()
                 center = (front + back) / 2
                 hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
                 last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
                 det_conf = float(confs[best_idx])
 
-            writer.writerow([frame_idx, *last_pose, det_conf])
-            position_writer.writerow([frame_idx, *last_pose[:2], det_conf])
+            writer.writerow([frame_idx, *last_pose, target_id, det_conf])
+            position_writer.writerow([frame_idx, *last_pose[:2], target_id, det_conf])
             json_frames.append(frame_idx)
             json_hd.append(last_pose[-1])
 
