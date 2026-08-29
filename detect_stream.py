@@ -42,7 +42,7 @@ for video_path, csv_path, position_path, json_path in file_list:
 
     json_frames = []
     json_hd = []
-    last_pose = [np.nan] * 7
+    last_pose = [None] * 7
 
     with open(csv_path, "w", newline="") as f, open(position_path, "w", newline="") as position_file:
         writer = csv.writer(f)
@@ -72,13 +72,13 @@ for video_path, csv_path, position_path, json_path in file_list:
                 front, back = r.keypoints.xy[best_idx].cpu().numpy()
                 center = (front + back) / 2
                 hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
-                last_pose = [*center, *front, *back, hd_deg]
+                last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
                 det_conf = float(confs[best_idx])
 
             writer.writerow([frame_idx, *last_pose, det_conf])
             position_writer.writerow([frame_idx, *last_pose[:2], det_conf])
             json_frames.append(frame_idx)
-            json_hd.append(float(last_pose[-1]))
+            json_hd.append(last_pose[-1])
 
     # ----------------------------------------
     # Save compact HD JSON
