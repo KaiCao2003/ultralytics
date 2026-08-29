@@ -62,3 +62,53 @@ random JPGs and does not create dataset splits.
 - `data/mouse_1909.yaml` points to the existing YOLOv5 mouse dataset.
 - `runs/` receives local train, validation, prediction, and tracking outputs and is ignored by Git.
 - The custom work lives on branch `local/yolov26-workflow`; update it with `git pull --rebase` when upstream changes.
+
+## Headplate active-learning web app
+
+The Linux web app runs from `/mnt/ssd4.1/apps/headplate-yolo` and is exposed by nginx at `/yolo`. It never uploads or
+downloads experiment files through the browser. Users place videos and Label Studio exports directly in a project
+folder under `/mnt/senzailab`, and every generated artifact stays in that folder.
+
+### Project flow
+
+1. Create `/mnt/senzailab/<project>` and place one or more videos directly inside it.
+2. Open `http://<server>/yolo`, sign in with the shared lab access question, and select the folder.
+3. Initialize the project and prepare Round 1. The app creates 100 uniformly sampled frames plus:
+   - `headplate-yolo/round_01/label_studio/label_config.xml`
+   - `headplate-yolo/round_01/label_studio/label_studio_import.json`
+   - `headplate-yolo/round_01/label_studio/frame_manifest.csv`
+4. Import the JSON into Label Studio, label `front` and `back`, and put the exported JSON directly in the project folder.
+5. Select that export in the app. The background worker converts it to YOLO Pose, trains model v1, analyzes every
+   source video, writes CSV/HD JSON/overlay MP4, and prepares pre-labeled Round 2 review frames.
+6. Repeat the Label Studio export/import step for Round 2. The app creates dataset v2, trains model v2, and writes the
+   final results under `headplate-yolo/round_02/results/`.
+
+Label Studio must use `/mnt/senzailab` as its local-files document root:
+
+```bash
+export LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+export LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/mnt/senzailab
+```
+
+### Linux installation
+
+```bash
+cd /mnt/ssd4.1/apps/headplate-yolo
+/home/kai/.local/bin/uv venv --python 3.12
+/home/kai/.local/bin/uv pip install --python .venv/bin/python -e ".[workflow]"
+```
+
+The user unit and nginx location are in `deploy/headplate-yolo.service` and `deploy/nginx-yolo-location.conf`. The
+service reuses `/home/kai/.config/lab-access-gate/pi-first-name.env`, matching the other lab apps. Install the unit at
+`~/.config/systemd/user/headplate-yolo.service`, include the nginx location file inside the lab app server block, then
+run:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now headplate-yolo.service
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+The service binds only to `127.0.0.1:3007`; nginx is the public entry point. Its default data root is
+`/mnt/senzailab`, and the app rejects paths that escape that root.
