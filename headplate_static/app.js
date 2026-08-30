@@ -191,9 +191,19 @@ function renderArtifacts(workflow) {
     const title = document.createElement("strong");
     title.textContent = artifact.video;
     item.append(title);
-    [artifact.csv, artifact.json, artifact.overlay].forEach((path) => {
+    const summary = document.createElement("span");
+    summary.className = "artifact__summary";
+    summary.textContent = `${artifact.detected_frames ?? artifact.valid_frames}/${artifact.frames} measured · ${artifact.held_frames ?? 0} held`;
+    item.append(summary);
+    [
+      ["Pose CSV", artifact.csv],
+      ["Position CSV", artifact.position_csv],
+      ["HD JSON", artifact.json],
+      ["Overlay", artifact.overlay],
+    ].forEach(([label, path]) => {
+      if (!path) return;
       const line = document.createElement("span");
-      line.textContent = path;
+      line.textContent = `${label}: ${path}`;
       item.append(line);
     });
     container.append(item);

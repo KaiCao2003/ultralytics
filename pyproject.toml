@@ -157,6 +157,7 @@ solutions = [
 ]
 workflow = [
     "fastapi>=0.115.0",
+    "lap>=0.5.12",
     "uvicorn>=0.30.0",
 ]
 llm = [

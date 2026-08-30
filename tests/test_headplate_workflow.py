@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import importlib
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -17,6 +19,7 @@ from headplate_workflow import (
     build_dataset,
     configure_project,
     heading_degrees,
+    infer_round,
     prepare_round1,
     resolve_under,
     select_review_frames,
@@ -106,6 +109,82 @@ def test_review_selection_uses_all_three_reasons():
     selected = select_review_frames(rows, 10, 42)
     assert len(selected) == 10
     assert {reason for _, reason in selected} == {"low_confidence", "heading_jump", "random"}
+
+
+def test_infer_round_tracks_identity_and_holds_missing_pose(tmp_path, monkeypatch):
+    root = tmp_path / "senzailab"
+    project = root / "mouse-01"
+    project.mkdir(parents=True)
+    video = project / "session.avi"
+    make_video(video, frames=4)
+    monkeypatch.setenv("YOLO_WORKFLOW_ROOT", str(root))
+    configure_project(project, [video], {"device": "cpu", "imgsz": 64})
+    model_path = project / "model.pt"
+    model_path.touch()
+
+    class ArrayValue:
+        def __init__(self, values):
+            self.values = np.asarray(values)
+
+        def cpu(self):
+            return self
+
+        def __getitem__(self, index):
+            return ArrayValue(self.values[index])
+
+        def int(self):
+            return ArrayValue(self.values.astype(int))
+
+        def numpy(self):
+            return self.values
+
+    class Collection(SimpleNamespace):
+        def __len__(self):
+            return len(self.conf.values if hasattr(self, "conf") else self.xy.values)
+
+    def result(ids=None, confidences=None, points=None):
+        image = np.zeros((48, 64, 3), dtype=np.uint8)
+        if ids is None:
+            return SimpleNamespace(boxes=None, keypoints=None, orig_img=image)
+        boxes = Collection(
+            conf=ArrayValue(confidences),
+            id=ArrayValue(ids),
+            xyxy=ArrayValue([[4, 4, 30, 30] for _ in ids]),
+        )
+        keypoints = Collection(xy=ArrayValue(points))
+        return SimpleNamespace(boxes=boxes, keypoints=keypoints, orig_img=image)
+
+    tracked_results = [
+        result(),
+        result([3, 7], [0.8, 0.9], [[[18, 10], [8, 10]], [[20, 10], [10, 10]]]),
+        result([7, 8], [0.55, 0.99], [[[22, 10], [12, 10]], [[50, 30], [40, 30]]]),
+        result(),
+    ]
+
+    class FakeYOLO:
+        def __init__(self, _model):
+            pass
+
+        def track(self, **_settings):
+            return tracked_results
+
+    monkeypatch.setattr("ultralytics.YOLO", FakeYOLO)
+    artifact = infer_round(project, 1, model_path)[0]
+
+    with (project / artifact["csv"]).open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["center_x"] == "" and math.isnan(float(rows[0]["det_conf"]))
+    assert rows[1]["track_id"] == "7" and float(rows[1]["center_x"]) == 15
+    assert rows[2]["track_id"] == "7" and float(rows[2]["center_x"]) == 17
+    assert rows[3]["center_x"] == rows[2]["center_x"] and math.isnan(float(rows[3]["det_conf"]))
+
+    with (project / artifact["position_csv"]).open(newline="") as handle:
+        position_rows = list(csv.DictReader(handle))
+    assert position_rows[3]["center_x"] == position_rows[2]["center_x"]
+    hd = json.loads((project / artifact["json"]).read_text())["hp4"]
+    assert hd["frames"] == [0, 1, 2, 3]
+    assert hd["hd"] == [None, 270.0, 270.0, 270.0]
+    assert artifact["detected_frames"] == 2 and artifact["held_frames"] == 1
 
 
 def test_train_round_uses_trainer_checkpoint(tmp_path, monkeypatch):

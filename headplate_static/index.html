@@ -101,6 +101,10 @@
                   ><span>HD JSON key</span><input id="json-key" type="text" pattern="[A-Za-z0-9_-]+" required
                 /></label>
               </div>
+              <p class="workflow-note">
+                <strong>Identity-aware analysis:</strong> keeps the same tracked rigid body when possible. Missed frames
+                hold the previous position and head direction while confidence remains <code>nan</code>.
+              </p>
               <button class="button button--primary" type="submit">Initialize project</button>
             </form>
 
@@ -137,13 +141,13 @@
 
             <div id="running-panel" hidden>
               <p>The background worker keeps running if this page is refreshed or closed.</p>
-              <p class="muted">Training and full-video inference can take a while.</p>
+              <p class="muted">Training and identity-aware full-video tracking can take a while.</p>
             </div>
 
             <div id="complete-panel" hidden>
               <p>
-                The second model and final analysis files are ready. Files stay in the project folder; nothing is
-                uploaded through the browser.
+                The second model, pose CSV, position CSV, continuous HD JSON, and tracked overlay are ready. Files stay
+                in the project folder; nothing is uploaded through the browser.
               </p>
               <div id="artifact-list" class="artifact-list"></div>
             </div>
@@ -164,6 +168,10 @@
               <div>
                 <dt>Data root</dt>
                 <dd>/mnt/senzailab</dd>
+              </div>
+              <div>
+                <dt>Analysis</dt>
+                <dd>Track + hold</dd>
               </div>
             </dl>
             <details id="log-details">

@@ -79,7 +79,9 @@ folder under `/mnt/senzailab`, and every generated artifact stays in that folder
    - `headplate-yolo/round_01/label_studio/frame_manifest.csv`
 4. Import the JSON into Label Studio, label `front` and `back`, and put the exported JSON directly in the project folder.
 5. Select that export in the app. The background worker converts it to YOLO Pose, trains model v1, analyzes every
-   source video, writes CSV/HD JSON/overlay MP4, and prepares pre-labeled Round 2 review frames.
+   source video with identity-aware tracking, writes pose CSV/position CSV/continuous HD JSON/overlay MP4, and prepares
+   pre-labeled Round 2 review frames. It retains the current `track_id` when possible and forward-fills pose, position,
+   and HD across missed detections while leaving `det_conf` as `nan`.
 6. Repeat the Label Studio export/import step for Round 2. The app creates dataset v2, trains model v2, and writes the
    final results under `headplate-yolo/round_02/results/`.
 

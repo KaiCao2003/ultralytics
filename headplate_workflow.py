@@ -544,51 +544,53 @@ def heading_degrees(front: tuple[float, float], back: tuple[float, float]) -> fl
     return float(np.degrees(np.arctan2(-dx, -dy)) % 360)
 
 
-def _draw_detection(frame: np.ndarray, detection: dict[str, Any]) -> None:
-    """Draw the selected bounding box, keypoints, confidence, and heading."""
+def _draw_detection(frame: np.ndarray, detection: dict[str, Any], *, held: bool = False) -> None:
+    """Draw the selected pose, distinguishing measured and forward-filled frames."""
     x1, y1, x2, y2 = detection["box"]
     front = tuple(round(value) for value in detection["front"])
     back = tuple(round(value) for value in detection["back"])
     center = tuple(round((a + b) / 2) for a, b in zip(detection["front"], detection["back"]))
     theta = math.radians(detection["hd_deg"])
     end = (round(center[0] - 80 * math.sin(theta)), round(center[1] - 80 * math.cos(theta)))
-    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 120), 2)
-    cv2.putText(
-        frame,
-        f"headplate {detection['det_conf']:.2f}",
-        (x1, max(22, y1 - 8)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.65,
-        (0, 220, 120),
-        2,
-        cv2.LINE_AA,
-    )
-    cv2.circle(frame, front, 7, (0, 0, 255), -1)
-    cv2.circle(frame, back, 7, (255, 80, 0), -1)
-    cv2.putText(frame, "front", (front[0] + 8, front[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-    cv2.putText(frame, "back", (back[0] + 8, back[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 80, 0), 2)
-    cv2.arrowedLine(frame, center, end, (0, 220, 255), 4, cv2.LINE_AA, tipLength=0.25)
+    color = (0, 165, 255) if held else (0, 220, 120)
+    if held:
+        cv2.circle(frame, center, 6, color, -1)
+        label = f"held track {detection['track_id']}"
+    else:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.circle(frame, front, 7, (0, 0, 255), -1)
+        cv2.circle(frame, back, 7, (255, 80, 0), -1)
+        cv2.putText(frame, "front", (front[0] + 8, front[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        cv2.putText(frame, "back", (back[0] + 8, back[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 80, 0), 2)
+        label = f"track {detection['track_id']}  conf {detection['det_conf']:.2f}"
+    cv2.putText(frame, label, (x1, max(22, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+    cv2.arrowedLine(frame, center, end, color, 4, cv2.LINE_AA, tipLength=0.25)
     cv2.putText(
         frame,
         f"HD {detection['hd_deg']:.1f} deg",
         (end[0] + 10, end[1] - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
-        (0, 220, 255),
+        color,
         2,
         cv2.LINE_AA,
     )
 
 
-def _best_detection(result: Any) -> dict[str, Any] | None:
-    """Return the highest-confidence valid pose detection."""
+def _tracked_detection(result: Any, target_id: int | None) -> tuple[dict[str, Any] | None, int | None]:
+    """Return the current tracked pose, retaining an existing identity when available."""
     if result.boxes is None or result.keypoints is None or len(result.boxes) == 0 or len(result.keypoints) == 0:
-        return None
+        return None, target_id
     confidences = result.boxes.conf.cpu().numpy()
     index = int(np.argmax(confidences))
+    track_ids = result.boxes.id
+    ids = track_ids.int().cpu().numpy() if track_ids is not None else None
+    if target_id is not None and ids is not None and target_id in ids:
+        index = int(np.flatnonzero(ids == target_id)[0])
+    target_id = int(ids[index]) if ids is not None else target_id
     points = result.keypoints.xy[index].cpu().numpy()
     if len(points) < 2:
-        return None
+        return None, target_id
     front, back = points[0].astype(float), points[1].astype(float)
     if (
         not np.all(np.isfinite([*front, *back]))
@@ -596,19 +598,23 @@ def _best_detection(result: Any) -> dict[str, Any] | None:
         or np.linalg.norm(back) <= 1e-6
         or np.linalg.norm(front - back) <= 1e-6
     ):
-        return None
+        return None, target_id
     box = result.boxes.xyxy[index].cpu().numpy().astype(int).tolist()
-    return {
-        "box": box,
-        "front": front.tolist(),
-        "back": back.tolist(),
-        "hd_deg": heading_degrees(tuple(front), tuple(back)),
-        "det_conf": float(confidences[index]),
-    }
+    return (
+        {
+            "box": box,
+            "front": front.tolist(),
+            "back": back.tolist(),
+            "hd_deg": heading_degrees(tuple(front), tuple(back)),
+            "track_id": target_id,
+            "det_conf": float(confidences[index]),
+        },
+        target_id,
+    )
 
 
 def infer_round(project: Path, round_number: int, model_path: Path) -> list[dict[str, Any]]:
-    """Run inference once per video while writing CSV, JSON, and overlay video."""
+    """Track each video once while writing continuous pose, position, HD, and overlay artifacts."""
     from ultralytics import YOLO
 
     project = resolve_under(workflow_root(), project)
@@ -626,6 +632,7 @@ def infer_round(project: Path, round_number: int, model_path: Path) -> list[dict
     for video_index, (video, meta) in enumerate(zip(videos, metadata), 1):
         stem = f"v{video_index:02d}_{_slug(video.stem)}"
         csv_path = output_dir / f"{stem}_pose.csv"
+        position_path = output_dir / f"{stem}_position.csv"
         json_path = output_dir / f"{stem}_hd.json"
         overlay_path = output_dir / f"{stem}_overlay.mp4"
         writer = cv2.VideoWriter(
@@ -633,8 +640,11 @@ def infer_round(project: Path, round_number: int, model_path: Path) -> list[dict
         )
         if not writer.isOpened():
             raise RuntimeError(f"Cannot create overlay video: {overlay_path}")
-        valid_frames, json_frames, json_hd = 0, [], []
-        results = model.predict(
+        detected_frames = held_frames = 0
+        json_frames, json_hd = [], []
+        last_detection = None
+        target_id = None
+        results = model.track(
             source=str(video),
             conf=float(config["conf"]),
             imgsz=int(config["imgsz"]),
@@ -642,26 +652,47 @@ def infer_round(project: Path, round_number: int, model_path: Path) -> list[dict
             stream=True,
             verbose=False,
         )
-        with csv_path.open("w", newline="", encoding="utf-8") as handle:
-            csv_writer = csv.writer(handle)
+        with csv_path.open("w", newline="", encoding="utf-8") as handle, position_path.open(
+            "w", newline="", encoding="utf-8"
+        ) as position_handle:
+            csv_writer, position_writer = csv.writer(handle), csv.writer(position_handle)
             csv_writer.writerow(
-                ["frame", "center_x", "center_y", "front_x", "front_y", "back_x", "back_y", "hd_deg", "det_conf"]
+                [
+                    "frame",
+                    "center_x",
+                    "center_y",
+                    "front_x",
+                    "front_y",
+                    "back_x",
+                    "back_y",
+                    "hd_deg",
+                    "track_id",
+                    "det_conf",
+                ]
             )
+            position_writer.writerow(["frame", "center_x", "center_y", "track_id", "det_conf"])
             for frame_index, result in enumerate(results):
                 frame = result.orig_img.copy()
-                detection = _best_detection(result)
-                if detection is None:
-                    csv_writer.writerow([frame_index, *([math.nan] * 8)])
+                detection, target_id = _tracked_detection(result, target_id)
+                if detection is not None:
+                    last_detection = detection
+                    detected_frames += 1
+                elif last_detection is not None:
+                    held_frames += 1
+
+                if last_detection is None:
+                    pose = [None] * 7
                 else:
-                    front, back = detection["front"], detection["back"]
+                    front, back = last_detection["front"], last_detection["back"]
                     center = [(front[0] + back[0]) / 2, (front[1] + back[1]) / 2]
-                    csv_writer.writerow(
-                        [frame_index, *center, *front, *back, detection["hd_deg"], detection["det_conf"]]
-                    )
-                    json_frames.append(frame_index)
-                    json_hd.append(detection["hd_deg"])
-                    valid_frames += 1
-                    _draw_detection(frame, detection)
+                    pose = [*center, *front, *back, last_detection["hd_deg"]]
+                    _draw_detection(frame, last_detection, held=detection is None)
+                det_conf = detection["det_conf"] if detection is not None else math.nan
+                row_track_id = last_detection["track_id"] if last_detection is not None else target_id
+                csv_writer.writerow([frame_index, *pose, row_track_id, det_conf])
+                position_writer.writerow([frame_index, *pose[:2], row_track_id, det_conf])
+                json_frames.append(frame_index)
+                json_hd.append(pose[-1])
                 writer.write(frame)
                 completed += 1
                 if completed % 100 == 0 or completed == total_frames:
@@ -676,10 +707,13 @@ def infer_round(project: Path, round_number: int, model_path: Path) -> list[dict
             {
                 "video": video.relative_to(project).as_posix(),
                 "csv": csv_path.relative_to(project).as_posix(),
+                "position_csv": position_path.relative_to(project).as_posix(),
                 "json": json_path.relative_to(project).as_posix(),
                 "overlay": overlay_path.relative_to(project).as_posix(),
                 "frames": meta["frames"],
-                "valid_frames": valid_frames,
+                "valid_frames": detected_frames,
+                "detected_frames": detected_frames,
+                "held_frames": held_frames,
             }
         )
     _atomic_json(output_dir / "summary.json", {"round": round_number, "artifacts": artifacts})

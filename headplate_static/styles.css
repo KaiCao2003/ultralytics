@@ -339,6 +339,14 @@ select:focus {
   margin-bottom: 10px;
   font-weight: 750;
 }
+.workflow-note {
+  margin: 0;
+  padding: 12px 14px;
+  color: #3c4d63;
+  border-left: 3px solid var(--blue);
+  background: #f3f7fc;
+  font-size: 0.86rem;
+}
 .check-list {
   display: grid;
   gap: 8px;
@@ -406,6 +414,12 @@ select:focus {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 0.78rem;
   overflow-wrap: anywhere;
+}
+.artifact .artifact__summary {
+  margin: 5px 0 8px;
+  color: #35516e;
+  font-family: inherit;
+  font-weight: 700;
 }
 .stats {
   display: grid;
