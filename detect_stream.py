@@ -55,7 +55,7 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
         source=video_path,
         conf=0.25,
         imgsz=1024,
-        # device="mps",
+        device="mps",
         stream=True,
     )
 
@@ -83,50 +83,6 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
                 "det_conf",
             ]
         )
-        position_writer.writerows(
-            [
-                [
-                    "Format Version",
-                    "1.25",
-                    "Take Name",
-                    Path(video_path).stem,
-                    "Take Notes",
-                    "YOLO26 pose tracking",
-                    "Capture Frame Rate",
-                    fps,
-                    "Export Frame Rate",
-                    fps,
-                    "Capture Start Time",
-                    "",
-                    "Capture Start Frame",
-                    0,
-                    "Total Frames in Take",
-                    total_frames,
-                    "Total Exported Frames",
-                    total_frames,
-                    "Rotation Type",
-                    "XYZ",
-                    "Length Units",
-                    "Pixels",
-                    "Coordinate Space",
-                    "Image",
-                ],
-                [],
-                ["", "Type", *["Rigid Body"] * 6, *["Marker"] * 6],
-                ["", "Name", *[RIGID_BODY] * 6, *[FRONT_MARKER] * 3, *[BACK_MARKER] * 3],
-                [
-                    "",
-                    "ID",
-                    *[f"YOLO26:{RIGID_BODY}"] * 6,
-                    *[f"YOLO26:{FRONT_MARKER}"] * 3,
-                    *[f"YOLO26:{BACK_MARKER}"] * 3,
-                ],
-                ["", "Parent", *[""] * 12],
-                ["", "", *["Rotation"] * 3, *["Position"] * 3, *["Position"] * 6],
-                ["Frame", "Time (Seconds)", *["X", "Y", "Z"] * 4],
-            ]
-        )
-
         for frame_idx, r in enumerate(results):
             det_conf = np.nan
 
@@ -134,20 +90,16 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
                 confs = r.boxes.conf.cpu().numpy()
                 track_ids = r.boxes.id.int().cpu().numpy()
 
-                if target_id is None:
-                    best_idx = int(np.argmax(confs))
-                elif target_id in track_ids:
+                best_idx = int(np.argmax(confs))
+                if target_id is not None and target_id in track_ids:
                     best_idx = int(np.flatnonzero(track_ids == target_id)[0])
-                else:
-                    best_idx = None
 
-                if best_idx is not None:
-                    target_id = int(track_ids[best_idx])
-                    front, back = r.keypoints.xy[best_idx].cpu().numpy()
-                    center = (front + back) / 2
-                    hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
-                    last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
-                    det_conf = float(confs[best_idx])
+                target_id = int(track_ids[best_idx])
+                front, back = r.keypoints.xy[best_idx].cpu().numpy()
+                center = (front + back) / 2
+                hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
+                last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
+                det_conf = float(confs[best_idx])
 
             writer.writerow([frame_idx, *last_pose, target_id, det_conf])
             position_rows.append(
@@ -195,6 +147,49 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
         for row in position_rows:
             if row[4] is None:
                 row[2:] = first_pose
+        position_writer.writerows(
+            [
+                [
+                    "Format Version",
+                    "1.25",
+                    "Take Name",
+                    Path(video_path).stem,
+                    "Take Notes",
+                    "YOLO26 pose tracking",
+                    "Capture Frame Rate",
+                    fps,
+                    "Export Frame Rate",
+                    fps,
+                    "Capture Start Time",
+                    "",
+                    "Capture Start Frame",
+                    0,
+                    "Total Frames in Take",
+                    total_frames,
+                    "Total Exported Frames",
+                    len(position_rows),
+                    "Rotation Type",
+                    "XYZ",
+                    "Length Units",
+                    "Pixels",
+                    "Coordinate Space",
+                    "Image",
+                ],
+                [],
+                ["", "Type", *["Rigid Body"] * 6, *["Marker"] * 6],
+                ["", "Name", *[RIGID_BODY] * 6, *[FRONT_MARKER] * 3, *[BACK_MARKER] * 3],
+                [
+                    "",
+                    "ID",
+                    *[f"YOLO26:{RIGID_BODY}"] * 6,
+                    *[f"YOLO26:{FRONT_MARKER}"] * 3,
+                    *[f"YOLO26:{BACK_MARKER}"] * 3,
+                ],
+                ["", "Parent", *[""] * 12],
+                ["", "", *["Rotation"] * 3, *["Position"] * 3, *["Position"] * 6],
+                ["Frame", "Time (Seconds)", *["X", "Y", "Z"] * 4],
+            ]
+        )
         position_writer.writerows(position_rows)
 
     json_hd = [first_pose[2] if hd is None else hd for hd in json_hd]
