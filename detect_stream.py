@@ -53,7 +53,7 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
 
     results = model.track(
         source=video_path,
-        conf=0.5,
+        conf=0.25,
         imgsz=1024,
         # device="mps",
         stream=True,
@@ -130,7 +130,7 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
         for frame_idx, r in enumerate(results):
             det_conf = np.nan
 
-            if len(r.boxes):
+            if len(r.boxes) and r.boxes.id is not None:
                 confs = r.boxes.conf.cpu().numpy()
                 track_ids = r.boxes.id.int().cpu().numpy()
 
