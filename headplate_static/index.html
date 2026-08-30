@@ -19,19 +19,32 @@
 
     <main>
       <section class="project-picker" aria-labelledby="project-heading">
-        <div>
+        <div class="project-picker__intro">
           <p class="section-kicker">Workspace</p>
           <h2 id="project-heading">Choose a project folder</h2>
-          <p id="root-path" class="muted"></p>
+          <p class="muted">Data root: <code id="root-path"></code></p>
+          <p class="current-folder">Current folder: <code id="current-folder-path"></code></p>
         </div>
-        <div class="picker-controls">
-          <label class="field">
-            <span>Folder</span>
-            <select id="project-select">
-              <option value="">Select a folder</option>
-            </select>
-          </label>
-          <button id="refresh-button" class="button button--secondary" type="button">Refresh</button>
+        <div class="folder-browser">
+          <div class="picker-controls">
+            <button id="up-folder-button" class="button button--secondary" type="button">Up</button>
+            <label class="field">
+              <span>Subfolder</span>
+              <select id="folder-select">
+                <option value="">No subfolders</option>
+              </select>
+            </label>
+            <button id="open-folder-button" class="button button--secondary" type="button">Open</button>
+            <button id="use-folder-button" class="button button--primary" type="button">Use this folder</button>
+            <button id="refresh-button" class="button button--secondary" type="button">Refresh</button>
+          </div>
+          <form id="create-folder-form" class="create-folder-form">
+            <label class="field">
+              <span>New folder inside the current folder</span>
+              <input id="new-folder-name" type="text" maxlength="128" autocomplete="off" required />
+            </label>
+            <button class="button button--secondary" type="submit">Create and use</button>
+          </form>
         </div>
       </section>
 
@@ -40,7 +53,10 @@
       <section id="empty-state" class="empty-state">
         <div class="empty-mark" aria-hidden="true"></div>
         <h2>No project selected</h2>
-        <p>Put the source videos in a folder under <code>/mnt/senzailab</code>, then select that folder above.</p>
+        <p>
+          Browse to any subfolder under <code>/mnt/senzailab</code>, or create one above, then choose
+          <strong>Use this folder</strong>.
+        </p>
       </section>
 
       <section id="project-view" hidden>
@@ -105,7 +121,7 @@
                 <strong>Identity-aware analysis:</strong> keeps the same tracked rigid body when possible. Missed frames
                 hold the previous position and head direction while confidence remains <code>nan</code>.
               </p>
-              <button class="button button--primary" type="submit">Initialize project</button>
+              <button id="initialize-button" class="button button--primary" type="submit">Initialize project</button>
             </form>
 
             <div id="prepare-panel" hidden>

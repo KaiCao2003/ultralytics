@@ -67,12 +67,13 @@ random JPGs and does not create dataset splits.
 
 The Linux web app runs from `/mnt/ssd4.1/apps/headplate-yolo` and is exposed by nginx at `/yolo`. It never uploads or
 downloads experiment files through the browser. Users place videos and Label Studio exports directly in a project
-folder under `/mnt/senzailab`, and every generated artifact stays in that folder.
+folder at any depth under `/mnt/senzailab`, and every generated artifact stays in that folder. The folder browser can
+also create a new child folder without exposing any path outside that data root.
 
 ### Project flow
 
-1. Create `/mnt/senzailab/<project>` and place one or more videos directly inside it.
-2. Open `http://<server>/yolo`, sign in with the shared lab access question, and select the folder.
+1. Open `http://<server>/yolo`, sign in, then browse to any nested folder under `/mnt/senzailab` or create a new folder.
+2. Put one or more videos directly inside the chosen folder, press Refresh, and select **Use this folder**.
 3. Initialize the project and prepare Round 1. The app creates 100 uniformly sampled frames plus:
    - `headplate-yolo/round_01/label_studio/label_config.xml`
    - `headplate-yolo/round_01/label_studio/label_studio_import.json`

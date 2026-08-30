@@ -60,7 +60,7 @@ def annotated_tasks(import_path: Path) -> list[dict]:
 
 def test_prepare_round1_and_build_dataset(tmp_path, monkeypatch):
     root = tmp_path / "senzailab"
-    project = root / "mouse-01"
+    project = root / "cohort-a" / "mouse-01"
     project.mkdir(parents=True)
     video = project / "session.avi"
     make_video(video)
@@ -71,7 +71,7 @@ def test_prepare_round1_and_build_dataset(tmp_path, monkeypatch):
     assert len(list((label_dir / "frames").glob("*.jpg"))) == 4
     tasks = json.loads((label_dir / "label_studio_import.json").read_text())
     assert len(tasks) == 4
-    assert all(task["data"]["image"].startswith("/data/local-files/?d=mouse-01/") for task in tasks)
+    assert all(task["data"]["image"].startswith("/data/local-files/?d=cohort-a/mouse-01/") for task in tasks)
 
     annotations = project / "round1-export.json"
     annotations.write_text(json.dumps(annotated_tasks(label_dir / "label_studio_import.json")))
@@ -227,11 +227,13 @@ def test_access_gate_sessions(tmp_path):
     assert not gate.validate_session(token)
 
 
-def test_web_login_and_project_initialization(tmp_path, monkeypatch):
+def test_web_nested_folder_creation_and_project_initialization(tmp_path, monkeypatch):
     root = tmp_path / "senzailab"
-    project = root / "mouse-01"
+    project = root / "cohort-a" / "mouse-01"
     project.mkdir(parents=True)
     (project / "session.avi").touch()
+    (root / ".hidden").mkdir()
+    (root / "headplate-yolo").mkdir()
     monkeypatch.setenv("YOLO_WORKFLOW_ROOT", str(root))
     monkeypatch.setenv("YOLO_RUNTIME_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("YOLO_BASE_PATH", "")
@@ -253,14 +255,59 @@ def test_web_login_and_project_initialization(tmp_path, monkeypatch):
             follow_redirects=False,
         )
         assert response.status_code == 303
-        projects = client.get("/api/projects")
-        assert projects.status_code == 200
-        assert projects.json()["projects"] == ["mouse-01"]
+        folders = client.get("/api/folders")
+        assert folders.status_code == 200
+        assert folders.json()["current"] == "."
+        assert folders.json()["parent"] is None
+        assert folders.json()["folders"] == [{"name": "cohort-a", "path": "cohort-a"}]
+        nested = client.get("/api/folders", params={"folder": "cohort-a"})
+        assert nested.status_code == 200
+        assert nested.json()["parent"] == "."
+        assert nested.json()["folders"] == [{"name": "mouse-01", "path": "cohort-a/mouse-01"}]
         csrf = client.cookies.get("headplate_yolo_csrf")
+        security_headers = {"Origin": "http://testserver", "X-CSRF-Token": csrf}
+        created = client.post(
+            "/api/folders",
+            json={"parent": "cohort-a", "name": "mouse-02"},
+            headers=security_headers,
+        )
+        assert created.status_code == 201
+        assert created.json()["current"] == "cohort-a/mouse-02"
+        assert (root / "cohort-a" / "mouse-02").is_dir()
+        deeper = client.post(
+            "/api/folders",
+            json={"parent": "cohort-a/mouse-02", "name": "session-a"},
+            headers=security_headers,
+        )
+        assert deeper.status_code == 201
+        assert deeper.json()["current"] == "cohort-a/mouse-02/session-a"
+        duplicate = client.post(
+            "/api/folders",
+            json={"parent": "cohort-a", "name": "mouse-02"},
+            headers=security_headers,
+        )
+        assert duplicate.status_code == 409
+        for invalid_name in (" ", "..", "../outside", "child/folder", ".hidden", "headplate-yolo"):
+            rejected = client.post(
+                "/api/folders",
+                json={"parent": "cohort-a", "name": invalid_name},
+                headers=security_headers,
+            )
+            assert rejected.status_code == 400
+        assert client.get("/api/folders", params={"folder": str(root)}).status_code == 400
+        assert client.get("/api/folders", params={"folder": "../outside"}).status_code == 400
+        assert client.get("/api/project", params={"project": "."}).status_code == 400
+        assert client.get("/api/project", params={"project": "cohort-a/mouse-01/session.avi"}).status_code == 400
+        invalid_parent = client.post(
+            "/api/folders",
+            json={"parent": "cohort-a/mouse-01/session.avi", "name": "child"},
+            headers=security_headers,
+        )
+        assert invalid_parent.status_code == 400
         initialized = client.post(
             "/api/initialize",
-            json={"project": "mouse-01", "videos": ["session.avi"], "config": {}},
-            headers={"Origin": "http://testserver", "X-CSRF-Token": csrf},
+            json={"project": "cohort-a/mouse-01", "videos": ["session.avi"], "config": {}},
+            headers=security_headers,
         )
         assert initialized.status_code == 200
         assert initialized.json()["state"]["stage"] == "CONFIGURED"

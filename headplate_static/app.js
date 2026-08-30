@@ -1,4 +1,4 @@
-const state = { projects: [], defaults: {}, current: null, poller: null };
+const state = { browser: null, defaults: {}, current: null, poller: null };
 
 const byId = (id) => document.getElementById(id);
 
@@ -35,19 +35,35 @@ function setHidden(id, hidden) {
   byId(id).hidden = hidden;
 }
 
-async function loadProjects(preserve = true) {
+function clearProject() {
+  state.current = null;
+  setHidden("empty-state", false);
+  setHidden("project-view", true);
+  stopPolling();
+}
+
+function renderFolderBrowser(browser) {
+  state.browser = browser;
+  state.defaults = browser.defaults;
+  byId("root-path").textContent = browser.root;
+  byId("current-folder-path").textContent =
+    browser.current === "." ? browser.root : `${browser.root}/${browser.current}`;
+  const select = byId("folder-select");
+  select.replaceChildren(new Option(browser.folders.length ? "Select a subfolder" : "No subfolders", ""));
+  browser.folders.forEach((folder) => select.add(new Option(folder.name, folder.path)));
+  select.disabled = browser.folders.length === 0;
+  byId("open-folder-button").disabled = true;
+  byId("up-folder-button").disabled = browser.parent === null;
+  byId("use-folder-button").disabled = browser.current === ".";
+}
+
+async function loadFolder(folder = ".", preserveProject = false) {
   try {
     showError(null);
-    const selected = preserve ? byId("project-select").value : "";
-    const payload = await api("api/projects");
-    state.projects = payload.projects;
-    state.defaults = payload.defaults;
-    byId("root-path").textContent = payload.root;
-    const select = byId("project-select");
-    select.replaceChildren(new Option("Select a folder", ""));
-    payload.projects.forEach((name) => select.add(new Option(name, name)));
-    if (payload.projects.includes(selected)) select.value = selected;
-    if (select.value) await loadProject(select.value);
+    const browser = await api(`api/folders?folder=${encodeURIComponent(folder)}`);
+    renderFolderBrowser(browser);
+    if (preserveProject && state.current?.project === browser.current) await loadProject(browser.current);
+    else clearProject();
   } catch (error) {
     showError(error);
   }
@@ -55,10 +71,7 @@ async function loadProjects(preserve = true) {
 
 async function loadProject(name) {
   if (!name) {
-    state.current = null;
-    setHidden("empty-state", false);
-    setHidden("project-view", true);
-    stopPolling();
+    clearProject();
     return;
   }
   try {
@@ -123,6 +136,12 @@ function renderProject() {
 function renderConfig(videos) {
   const container = byId("video-options");
   container.replaceChildren();
+  if (!videos.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted folder-empty-message";
+    empty.textContent = "No videos here yet. Add video files to this folder on disk, then press Refresh.";
+    container.append(empty);
+  }
   videos.forEach((video, index) => {
     const label = document.createElement("label");
     label.className = "check-item";
@@ -135,6 +154,7 @@ function renderConfig(videos) {
     label.append(input, document.createTextNode(video));
     container.append(label);
   });
+  byId("initialize-button").disabled = videos.length === 0;
   const defaults = state.defaults;
   byId("round1-frames").value = defaults.round1_frames;
   byId("review-frames").value = defaults.review_frames;
@@ -268,6 +288,22 @@ async function initializeProject(event) {
   }
 }
 
+async function createFolder(event) {
+  event.preventDefault();
+  try {
+    showError(null);
+    const browser = await api("api/folders", {
+      method: "POST",
+      body: JSON.stringify({ parent: state.browser.current, name: byId("new-folder-name").value }),
+    });
+    byId("new-folder-name").value = "";
+    renderFolderBrowser(browser);
+    await loadProject(browser.current);
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function runAction(path, payload) {
   try {
     showError(null);
@@ -278,8 +314,19 @@ async function runAction(path, payload) {
   }
 }
 
-byId("project-select").addEventListener("change", (event) => loadProject(event.target.value));
-byId("refresh-button").addEventListener("click", () => loadProjects(true));
+byId("folder-select").addEventListener("change", (event) => {
+  byId("open-folder-button").disabled = !event.target.value;
+});
+byId("open-folder-button").addEventListener("click", () => {
+  const folder = byId("folder-select").value;
+  if (folder) loadFolder(folder);
+});
+byId("up-folder-button").addEventListener("click", () => {
+  if (state.browser?.parent !== null) loadFolder(state.browser.parent);
+});
+byId("use-folder-button").addEventListener("click", () => loadProject(state.browser.current));
+byId("refresh-button").addEventListener("click", () => loadFolder(state.browser?.current || ".", true));
+byId("create-folder-form").addEventListener("submit", createFolder);
 byId("initialize-form").addEventListener("submit", initializeProject);
 byId("prepare-button").addEventListener("click", () => runAction("api/prepare", { project: state.current.project }));
 byId("process-button").addEventListener("click", () => {
@@ -292,4 +339,4 @@ byId("logout-button").addEventListener("click", async () => {
   window.location.assign("login");
 });
 
-loadProjects(false);
+loadFolder();

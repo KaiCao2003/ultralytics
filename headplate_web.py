@@ -24,6 +24,7 @@ from headplate_access import (
     same_origin,
 )
 from headplate_workflow import (
+    WORKSPACE_NAME,
     configure_project,
     default_config,
     discover_annotation_exports,
@@ -62,18 +63,79 @@ class ProcessRequest(ProjectRequest):
     annotations: str
 
 
+class CreateFolderRequest(BaseModel):
+    """Create one child folder below the data root."""
+
+    parent: str = "."
+    name: str
+
+
 def _secure_request(request: Request) -> bool:
     forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     return (forwarded or request.url.scheme).casefold() == "https"
 
 
+def _folder(relative: str) -> Path:
+    """Resolve an existing directory below the data root."""
+    value = Path(relative.strip() or ".")
+    if value.is_absolute():
+        raise HTTPException(400, "Folder path must be relative to the data root")
+    try:
+        folder = resolve_under(workflow_root(), value)
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(400, str(error)) from error
+    if not folder.is_dir():
+        raise HTTPException(400, f"Not a folder: {folder}")
+    return folder
+
+
 def _project(relative: str) -> Path:
     if not relative.strip():
         raise HTTPException(400, "Select a project folder")
+    project = _folder(relative)
+    if project == workflow_root():
+        raise HTTPException(400, "Select a folder under the data root")
+    return project
+
+
+def _folder_view(folder: Path) -> dict[str, object]:
+    """Return one safe level of the data-root directory tree."""
+    root = workflow_root()
+    children = []
+    for child in folder.iterdir():
+        if child.name.startswith(".") or child.name == WORKSPACE_NAME or child.is_symlink() or not child.is_dir():
+            continue
+        children.append({"name": child.name, "path": child.relative_to(root).as_posix()})
+    return {
+        "root": str(root),
+        "current": folder.relative_to(root).as_posix(),
+        "parent": None if folder == root else folder.parent.relative_to(root).as_posix(),
+        "folders": sorted(children, key=lambda item: str(item["name"]).casefold()),
+        "defaults": default_config(),
+    }
+
+
+def _create_folder(parent: Path, name: str) -> Path:
+    """Create one visible child directory in an existing safe parent."""
+    name = name.strip()
+    if (
+        not name
+        or len(name) > 128
+        or name in {".", "..", WORKSPACE_NAME}
+        or name.startswith(".")
+        or "/" in name
+        or "\\" in name
+        or any(ord(character) < 32 for character in name)
+    ):
+        raise HTTPException(400, "Enter one valid folder name")
+    target = parent / name
     try:
-        return resolve_under(workflow_root(), relative)
-    except (FileNotFoundError, ValueError) as error:
+        target.mkdir()
+    except FileExistsError as error:
+        raise HTTPException(409, f"Folder already exists: {name}") from error
+    except OSError as error:
         raise HTTPException(400, str(error)) from error
+    return target
 
 
 def _project_view(project: Path) -> dict[str, object]:
@@ -206,14 +268,13 @@ def create_app() -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
-    @application.get("/api/projects")
-    async def projects() -> dict[str, object]:
-        root = workflow_root()
-        return {
-            "root": str(root),
-            "projects": sorted(path.name for path in root.iterdir() if path.is_dir() and not path.name.startswith(".")),
-            "defaults": default_config(),
-        }
+    @application.get("/api/folders")
+    async def folders(folder: str = ".") -> dict[str, object]:
+        return _folder_view(_folder(folder))
+
+    @application.post("/api/folders", status_code=201)
+    async def create_folder(payload: CreateFolderRequest) -> dict[str, object]:
+        return _folder_view(_create_folder(_folder(payload.parent), payload.name))
 
     @application.get("/api/project")
     async def project(project: str) -> dict[str, object]:
