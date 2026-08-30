@@ -9,6 +9,8 @@ from ultralytics import YOLO
 
 MODEL_PATH = "runs/pose/headplate_pose_v2/weights/best.pt"
 RIGID_BODY = "hp4"
+FRONT_MARKER = f"{RIGID_BODY}:front"
+BACK_MARKER = f"{RIGID_BODY}:back"
 ARROW_LENGTH = 80
 
 file_list = [
@@ -39,6 +41,7 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
 
     video_writer = cv2.VideoWriter(
@@ -82,14 +85,45 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
         )
         position_writer.writerows(
             [
-                ["Format Version", "YOLO26"],
-                ["Take Name", Path(video_path).stem],
-                ["Capture Frame Rate", fps],
-                ["", "", *[RIGID_BODY] * 8],
-                ["", "", *["Rigid Body"] * 8],
-                ["Export Frame Rate", fps],
-                ["", "", *["Position"] * 3, *["Rotation"] * 3, *["Tracking"] * 2],
-                ["Frame", "Time (Seconds)", "X", "Y", "Z", "X", "Y", "Z", "Track ID", "Confidence"],
+                [
+                    "Format Version",
+                    "1.25",
+                    "Take Name",
+                    Path(video_path).stem,
+                    "Take Notes",
+                    "YOLO26 pose tracking",
+                    "Capture Frame Rate",
+                    fps,
+                    "Export Frame Rate",
+                    fps,
+                    "Capture Start Time",
+                    "",
+                    "Capture Start Frame",
+                    0,
+                    "Total Frames in Take",
+                    total_frames,
+                    "Total Exported Frames",
+                    total_frames,
+                    "Rotation Type",
+                    "XYZ",
+                    "Length Units",
+                    "Pixels",
+                    "Coordinate Space",
+                    "Image",
+                ],
+                [],
+                ["", "Type", *["Rigid Body"] * 6, *["Marker"] * 6],
+                ["", "Name", *[RIGID_BODY] * 6, *[FRONT_MARKER] * 3, *[BACK_MARKER] * 3],
+                [
+                    "",
+                    "ID",
+                    *[f"YOLO26:{RIGID_BODY}"] * 6,
+                    *[f"YOLO26:{FRONT_MARKER}"] * 3,
+                    *[f"YOLO26:{BACK_MARKER}"] * 3,
+                ],
+                ["", "Parent", *[""] * 12],
+                ["", "", *["Rotation"] * 3, *["Position"] * 3, *["Position"] * 6],
+                ["Frame", "Time (Seconds)", *["X", "Y", "Z"] * 4],
             ]
         )
 
@@ -117,7 +151,19 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
 
             writer.writerow([frame_idx, *last_pose, target_id, det_conf])
             position_rows.append(
-                [frame_idx, frame_idx / fps, *last_pose[:2], 0.0, 0.0, 0.0, last_pose[-1], target_id, det_conf]
+                [
+                    frame_idx,
+                    frame_idx / fps,
+                    0.0,
+                    0.0,
+                    last_pose[-1],
+                    *last_pose[:2],
+                    0.0,
+                    *last_pose[2:4],
+                    0.0,
+                    *last_pose[4:6],
+                    0.0,
+                ]
             )
             json_frames.append(frame_idx)
             json_hd.append(last_pose[-1])
@@ -145,13 +191,13 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
                 )
             video_writer.write(frame)
 
-        first_position = next(row[2:9] for row in position_rows if row[2] is not None)
+        first_pose = next(row[2:] for row in position_rows if row[4] is not None)
         for row in position_rows:
-            if row[2] is None:
-                row[2:9] = first_position
+            if row[4] is None:
+                row[2:] = first_pose
         position_writer.writerows(position_rows)
 
-    json_hd = [first_position[5] if hd is None else hd for hd in json_hd]
+    json_hd = [first_pose[2] if hd is None else hd for hd in json_hd]
 
     video_writer.release()
 
