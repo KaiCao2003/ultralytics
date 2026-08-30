@@ -2,11 +2,14 @@ import csv
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from ultralytics import YOLO
 
 MODEL_PATH = "runs/pose/headplate_pose_v2/weights/best.pt"
+RIGID_BODY = "hp4"
+ARROW_LENGTH = 80
 
 file_list = [
     (
@@ -14,36 +17,50 @@ file_list = [
         "runs/pose/bright_pose.csv",
         "runs/pose/bright_position.csv",
         "runs/pose/bright_hd.json",
+        "runs/pose/bright_hd.avi",
     ),
     (
         "data/videos/dark.avi",
         "runs/pose/dark_pose.csv",
         "runs/pose/dark_position.csv",
         "runs/pose/dark_hd.json",
+        "runs/pose/dark_hd.avi",
     ),
 ]
 
 model = YOLO(MODEL_PATH)
 
 
-for video_path, csv_path, position_path, json_path in file_list:
+for video_path, csv_path, position_path, json_path, output_path in file_list:
     print(f"Processing: {video_path}")
+
+    Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    video_writer = cv2.VideoWriter(
+        output_path,
+        cv2.VideoWriter_fourcc(*"MJPG"),
+        fps,
+        (width, height),
+    )
 
     results = model.track(
         source=video_path,
         conf=0.5,
         imgsz=1024,
         # device="mps",
-        save=True,
         stream=True,
     )
-
-    Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
 
     json_frames = []
     json_hd = []
     last_pose = [None] * 7
     target_id = None
+    position_rows = []
 
     with open(csv_path, "w", newline="") as f, open(position_path, "w", newline="") as position_file:
         writer = csv.writer(f)
@@ -63,37 +80,87 @@ for video_path, csv_path, position_path, json_path in file_list:
                 "det_conf",
             ]
         )
-        position_writer.writerow(["frame", "center_x", "center_y", "track_id", "det_conf"])
+        position_writer.writerows(
+            [
+                ["Format Version", "YOLO26"],
+                ["Take Name", Path(video_path).stem],
+                ["Capture Frame Rate", fps],
+                ["", "", *[RIGID_BODY] * 8],
+                ["", "", *["Rigid Body"] * 8],
+                ["Export Frame Rate", fps],
+                ["", "", *["Position"] * 3, *["Rotation"] * 3, *["Tracking"] * 2],
+                ["Frame", "Time (Seconds)", "X", "Y", "Z", "X", "Y", "Z", "Track ID", "Confidence"],
+            ]
+        )
 
         for frame_idx, r in enumerate(results):
             det_conf = np.nan
 
             if len(r.boxes):
                 confs = r.boxes.conf.cpu().numpy()
-                best_idx = int(np.argmax(confs))
                 track_ids = r.boxes.id.int().cpu().numpy()
 
-                if target_id in track_ids:
+                if target_id is None:
+                    best_idx = int(np.argmax(confs))
+                elif target_id in track_ids:
                     best_idx = int(np.flatnonzero(track_ids == target_id)[0])
+                else:
+                    best_idx = None
 
-                target_id = int(track_ids[best_idx])
-                front, back = r.keypoints.xy[best_idx].cpu().numpy()
-                center = (front + back) / 2
-                hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
-                last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
-                det_conf = float(confs[best_idx])
+                if best_idx is not None:
+                    target_id = int(track_ids[best_idx])
+                    front, back = r.keypoints.xy[best_idx].cpu().numpy()
+                    center = (front + back) / 2
+                    hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
+                    last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
+                    det_conf = float(confs[best_idx])
 
             writer.writerow([frame_idx, *last_pose, target_id, det_conf])
-            position_writer.writerow([frame_idx, *last_pose[:2], target_id, det_conf])
+            position_rows.append(
+                [frame_idx, frame_idx / fps, *last_pose[:2], 0.0, 0.0, 0.0, last_pose[-1], target_id, det_conf]
+            )
             json_frames.append(frame_idx)
             json_hd.append(last_pose[-1])
+
+            frame = r.orig_img.copy()
+            if last_pose[-1] is not None:
+                center_x, center_y = last_pose[:2]
+                theta = np.radians(last_pose[-1])
+                start = (round(center_x), round(center_y))
+                end = (
+                    round(center_x - ARROW_LENGTH * np.sin(theta)),
+                    round(center_y - ARROW_LENGTH * np.cos(theta)),
+                )
+                cv2.arrowedLine(frame, start, end, (0, 0, 255), 4, cv2.LINE_AA, tipLength=0.25)
+                cv2.circle(frame, start, 5, (0, 255, 255), -1)
+                cv2.putText(
+                    frame,
+                    f"{last_pose[-1]:.1f} deg",
+                    (end[0] + 10, end[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 0, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+            video_writer.write(frame)
+
+        first_position = next(row[2:9] for row in position_rows if row[2] is not None)
+        for row in position_rows:
+            if row[2] is None:
+                row[2:9] = first_position
+        position_writer.writerows(position_rows)
+
+    json_hd = [first_position[5] if hd is None else hd for hd in json_hd]
+
+    video_writer.release()
 
     # ----------------------------------------
     # Save compact HD JSON
     # ----------------------------------------
 
     json_data = {
-        "hp4": {
+        RIGID_BODY: {
             "frames": json_frames,
             "hd": json_hd,
         }
@@ -105,3 +172,4 @@ for video_path, csv_path, position_path, json_path in file_list:
     print(f"Saved CSV:  {csv_path}")
     print(f"Saved CSV:  {position_path}")
     print(f"Saved JSON: {json_path}")
+    print(f"Saved AVI:  {output_path}")
