@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Headplate YOLO</title>
+    <link rel="stylesheet" href="static/styles.css" />
+    <script src="static/app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Senzai Lab</p>
+        <h1>Headplate YOLO</h1>
+      </div>
+      <button id="logout-button" class="button button--quiet" type="button">Sign out</button>
+    </header>
+
+    <main>
+      <section class="project-picker" aria-labelledby="project-heading">
+        <div class="project-picker__intro">
+          <p class="section-kicker">Workspace</p>
+          <h2 id="project-heading">Choose a project folder</h2>
+          <p class="muted">Data root: <code id="root-path"></code></p>
+          <p class="current-folder">Current folder: <code id="current-folder-path"></code></p>
+        </div>
+        <div class="folder-browser">
+          <div class="picker-controls">
+            <button id="up-folder-button" class="button button--secondary" type="button">Up</button>
+            <label class="field">
+              <span>Subfolder</span>
+              <select id="folder-select">
+                <option value="">No subfolders</option>
+              </select>
+            </label>
+            <button id="open-folder-button" class="button button--secondary" type="button">Open</button>
+            <button id="use-folder-button" class="button button--primary" type="button">Use this folder</button>
+            <button id="refresh-button" class="button button--secondary" type="button">Refresh</button>
+          </div>
+          <form id="create-folder-form" class="create-folder-form">
+            <label class="field">
+              <span>New folder inside the current folder</span>
+              <input id="new-folder-name" type="text" maxlength="128" autocomplete="off" required />
+            </label>
+            <button class="button button--secondary" type="submit">Create and use</button>
+          </form>
+        </div>
+      </section>
+
+      <div id="alert" class="alert" role="alert" hidden></div>
+
+      <section id="empty-state" class="empty-state">
+        <div class="empty-mark" aria-hidden="true"></div>
+        <h2>No project selected</h2>
+        <p>
+          Browse to any subfolder under <code>/mnt/senzailab</code>, or create one above, then choose
+          <strong>Use this folder</strong>.
+        </p>
+      </section>
+
+      <section id="project-view" hidden>
+        <div class="status-row">
+          <div>
+            <p class="section-kicker">Current project</p>
+            <h2 id="project-name"></h2>
+          </div>
+          <div class="stage-block">
+            <span id="stage-badge" class="stage-badge"></span>
+            <span id="stage-message" class="muted"></span>
+          </div>
+        </div>
+
+        <ol id="timeline" class="timeline" aria-label="Workflow progress">
+          <li data-step="0">Project</li>
+          <li data-step="1">Round 1 labels</li>
+          <li data-step="2">Model v1</li>
+          <li data-step="3">Round 2 labels</li>
+          <li data-step="4">Final results</li>
+        </ol>
+
+        <div id="progress-shell" class="progress-shell" hidden>
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          <span id="progress-label">0%</span>
+        </div>
+
+        <div class="content-grid">
+          <section class="panel" aria-labelledby="action-heading">
+            <p class="section-kicker">Next action</p>
+            <h2 id="action-heading">Configure project</h2>
+
+            <form id="initialize-form" class="config-form" hidden>
+              <fieldset>
+                <legend>Videos in this folder</legend>
+                <div id="video-options" class="check-list"></div>
+              </fieldset>
+              <div class="form-grid">
+                <label class="field"
+                  ><span>Round 1 frames</span><input id="round1-frames" type="number" min="1" required
+                /></label>
+                <label class="field"
+                  ><span>Round 2 frames / video</span><input id="review-frames" type="number" min="1" required
+                /></label>
+                <label class="field"><span>Epochs</span><input id="epochs" type="number" min="1" required /></label>
+                <label class="field"
+                  ><span>Image size</span><input id="imgsz" type="number" min="32" step="32" required
+                /></label>
+                <label class="field"><span>Batch</span><input id="batch" type="number" required /></label>
+                <label class="field"><span>CUDA device</span><input id="device" type="text" required /></label>
+                <label class="field field--wide"
+                  ><span>Base pose model</span><input id="base-model" type="text" required
+                /></label>
+                <label class="field"
+                  ><span>Confidence</span><input id="confidence" type="number" min="0.01" max="1" step="0.01" required
+                /></label>
+                <label class="field"
+                  ><span>HD JSON key</span><input id="json-key" type="text" pattern="[A-Za-z0-9_-]+" required
+                /></label>
+              </div>
+              <p class="workflow-note">
+                <strong>Identity-aware analysis:</strong> keeps the same tracked rigid body when possible. Missed frames
+                hold the previous position and head direction while confidence remains <code>nan</code>.
+              </p>
+              <button id="initialize-button" class="button button--primary" type="submit">Initialize project</button>
+            </form>
+
+            <div id="prepare-panel" hidden>
+              <p>
+                The app will select the first review frames and create the Label Studio import files in this project.
+              </p>
+              <button id="prepare-button" class="button button--primary" type="button">Prepare Round 1</button>
+            </div>
+
+            <div id="annotation-panel" hidden>
+              <p>
+                Import the generated task file into Label Studio, finish the front/back labels, and export the JSON into
+                the project folder.
+              </p>
+              <dl class="path-list">
+                <div>
+                  <dt>Label Studio import</dt>
+                  <dd id="import-path"></dd>
+                </div>
+                <div>
+                  <dt>Label config</dt>
+                  <dd id="config-path"></dd>
+                </div>
+              </dl>
+              <label class="field">
+                <span>Label Studio export JSON</span>
+                <select id="annotation-select"></select>
+              </label>
+              <button id="process-button" class="button button--primary" type="button">
+                Process labels, train, and analyze
+              </button>
+            </div>
+
+            <div id="running-panel" hidden>
+              <p>The background worker keeps running if this page is refreshed or closed.</p>
+              <p class="muted">Training and identity-aware full-video tracking can take a while.</p>
+            </div>
+
+            <div id="complete-panel" hidden>
+              <p>
+                The second model, pose CSV, position CSV, continuous HD JSON, and tracked overlay are ready. Files stay
+                in the project folder; nothing is uploaded through the browser.
+              </p>
+              <div id="artifact-list" class="artifact-list"></div>
+            </div>
+          </section>
+
+          <aside class="panel panel--details" aria-labelledby="details-heading">
+            <p class="section-kicker">Project files</p>
+            <h2 id="details-heading">On-disk status</h2>
+            <dl class="stats">
+              <div>
+                <dt>Videos</dt>
+                <dd id="video-count">0</dd>
+              </div>
+              <div>
+                <dt>Current round</dt>
+                <dd id="round-number">—</dd>
+              </div>
+              <div>
+                <dt>Data root</dt>
+                <dd>/mnt/senzailab</dd>
+              </div>
+              <div>
+                <dt>Analysis</dt>
+                <dd>Track + hold</dd>
+              </div>
+            </dl>
+            <details id="log-details">
+              <summary>Worker log</summary>
+              <pre id="worker-log">No job log yet.</pre>
+            </details>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
