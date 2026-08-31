@@ -4,10 +4,11 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import torch
 
 from ultralytics import YOLO
 
-MODEL_PATH = "runs/pose/headplate_pose_v2/weights/best.pt"
+MODEL_PATH = "runs/pose/headplate_pose_v2.1/weights/best.pt"
 RIGID_BODY = "hp4"
 FRONT_MARKER = f"{RIGID_BODY}:front"
 BACK_MARKER = f"{RIGID_BODY}:back"
@@ -55,7 +56,7 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
         source=video_path,
         conf=0.25,
         imgsz=1024,
-        device="mps",
+        device="mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else None,
         stream=True,
     )
 
@@ -143,7 +144,10 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
                 )
             video_writer.write(frame)
 
-        first_pose = next(row[2:] for row in position_rows if row[4] is not None)
+        video_writer.release()
+        first_pose = next((row[2:] for row in position_rows if row[4] is not None), None)
+        if first_pose is None:
+            raise RuntimeError(f"No tracked poses found in {video_path}")
         for row in position_rows:
             if row[4] is None:
                 row[2:] = first_pose
@@ -193,8 +197,6 @@ for video_path, csv_path, position_path, json_path, output_path in file_list:
         position_writer.writerows(position_rows)
 
     json_hd = [first_pose[2] if hd is None else hd for hd in json_hd]
-
-    video_writer.release()
 
     # ----------------------------------------
     # Save compact HD JSON
