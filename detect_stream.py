@@ -25,7 +25,7 @@ video_path = f"{base_dir}/{date}/{date}_2/{date}.avi"
 data_dir = Path(video_path).parent / "data"
 remote_paths = [
     data_dir / f"{date}_position.csv",
-    data_dir / f"{date}.csv",
+    Path(video_path).with_suffix(".csv"),
     data_dir / "processed/heaed_direction.json",
     data_dir / f"{date}_hd.avi",
 ]
@@ -219,4 +219,4 @@ for remote_path in remote_paths:
     remote_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(local_dir / remote_path.name), str(remote_path))
 local_dir.rmdir()
-print(f"Saved outputs to: {data_dir}")
+print(f"Saved outputs to: {Path(video_path).parent}")
