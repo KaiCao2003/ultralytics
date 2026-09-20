@@ -1,0 +1,19 @@
+[Unit]
+Description=Headplate YOLO active-learning web app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/ssd4.1/apps/headplate-yolo
+EnvironmentFile=/home/kai/.config/lab-access-gate/pi-first-name.env
+Environment=PYTHONUNBUFFERED=1
+Environment=YOLO_WORKFLOW_ROOT=/mnt/senzailab
+Environment=YOLO_BASE_PATH=/yolo
+Environment=YOLO_RUNTIME_DIR=/mnt/ssd4.1/apps/headplate-yolo/.runtime
+ExecStart=/mnt/ssd4.1/apps/headplate-yolo/.venv/bin/uvicorn headplate_web:app --host 127.0.0.1 --port 3007 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
