@@ -12,8 +12,7 @@ import torch
 
 from ultralytics import YOLO
 
-# MODEL_PATH = "runs/pose/headplate_pose_v2_MotionBlur/weights/best.pt"
-MODEL_PATH = Path(__file__).resolve().parent / "runs/pose/headplate_pose_v2.1/weights/best.pt"
+MODEL_PATH = Path(__file__).resolve().parent / "runs/pose/headplate_260921/headplate_260921/weights/best.pt"
 
 RIGID_BODY = "hp4"
 FRONT_MARKER = f"{RIGID_BODY}:front"

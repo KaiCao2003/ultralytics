@@ -58,8 +58,8 @@ random JPGs and does not create dataset splits.
 
 ## Tracking exports
 
-The deployed recording script takes the recording root, date, and session number. Pass the weights explicitly when
-using a different training run:
+The deployed recording script takes the recording root, date, and session number. Both detection scripts default to
+the current `headplate_260921` weights; pass `--model` to select a different training run:
 
 ```bash
 python detect_stream.py '/mnt/senzailab/Kai/#Recording/m20' 260918 11 \
