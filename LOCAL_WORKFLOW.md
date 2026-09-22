@@ -8,7 +8,7 @@ dataset. The dataset is referenced in place, so its images and labels are not du
 ```bash
 cd /Users/vxf1610/developer/yolov26
 uv venv --python 3.12
-uv pip install --python .venv/bin/python -e .
+uv pip install --python .venv/bin/python -e . pandas
 source .venv/bin/activate
 python check_dataset.py
 ```
