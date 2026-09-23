@@ -177,8 +177,8 @@ def prepare_review(
         (output_dir / "label_config.xml").write_text(
             '<View>\n  <Image name="image" value="$image"/>\n'
             '  <KeyPointLabels name="keypoints" toName="image">\n'
-            '    <KeyPointLabel value="front" background="#ef4444"/>\n'
-            '    <KeyPointLabel value="back" background="#3b82f6"/>\n'
+            '    <Label value="front" background="#ef4444"/>\n'
+            '    <Label value="back" background="#3b82f6"/>\n'
             "  </KeyPointLabels>\n</View>\n",
             encoding="utf-8",
         )
