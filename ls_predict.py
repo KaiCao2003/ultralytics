@@ -196,7 +196,7 @@ def main():
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--local-files-root", type=Path, default=ROOT / "data")
+    parser.add_argument("--local-files-root", type=Path, default=ROOT)
     parser.add_argument("--bad", type=int, default=100)
     parser.add_argument("--ok", type=int, default=100)
     parser.add_argument("--min-gap-seconds", type=float, default=1.0)
