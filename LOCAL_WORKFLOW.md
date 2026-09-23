@@ -43,6 +43,20 @@ The wrappers map the old layout to the current API:
 | `val.py --weights ...`                   | `val.py model=...`                |
 | `export.py --weights ... --include onnx` | `export.py model=... format=onnx` |
 
+## Four-GPU pose training
+
+On a Linux CUDA machine with four visible GPUs and this checkout installed (`python -m pip install -e .`), run from
+the repository root with `data/datasets/headplate_260921/data.yaml` and its images and labels present:
+
+```bash
+python go.py
+```
+
+`go.py` uses GPUs 0, 1, 2, and 3 through Ultralytics DDP, which launches the four worker processes automatically.
+It trains `yolo26n-pose.pt` for 2000 epochs at 1024 px with early stopping disabled. The global batch is 64, or 16
+images per GPU. Edit the settings in `go.py`; this script does not parse command-line overrides. If memory is
+insufficient, reduce `batch` to a positive multiple of four, such as 32 or 16; AutoBatch is unsupported with DDP.
+
 ## Data utilities
 
 ```bash
