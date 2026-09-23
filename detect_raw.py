@@ -4,7 +4,6 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from tempfile import mkdtemp
 
 import cv2
 import numpy as np
@@ -12,6 +11,7 @@ import torch
 
 from local_cli import ROOT
 from ultralytics import YOLO
+from ultralytics.utils.files import increment_path
 
 MODEL_PATH = ROOT / "runs/pose/headplate_260921/headplate_260921/weights/best.pt"
 VIDEO_PATH = Path("/mnt/senzailab/Kai/#Recording/m20/260918/260918_11/260918.avi")
@@ -43,8 +43,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", nargs="?", type=Path, default=VIDEO_PATH)
     parser.add_argument("--model", type=Path, default=MODEL_PATH)
-    parser.add_argument("--output", type=Path, help="New output directory; default: data/labelstudio_raw/<unique run>.")
-    parser.add_argument("--local-files-root", type=Path, default=ROOT / "data")
+    parser.add_argument(
+        "--output", type=Path, default=ROOT / "runs/pose/predict_raw", help="Output directory; increment if it exists."
+    )
+    parser.add_argument("--local-files-root", type=Path, default=ROOT)
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else None)
     parser.add_argument("--imgsz", type=int, default=1024)
     parser.add_argument(
@@ -80,15 +82,10 @@ def main():
         raise ValueError("Use a two-keypoint pose model with keypoint order front, back")
 
     local_root = args.local_files_root.expanduser().resolve()
-    if args.output:
-        output = args.output.expanduser().resolve()
-        if not args.raw_only:
-            output.relative_to(local_root)
-        output.mkdir(parents=True, exist_ok=False)
-    else:
-        run_root = local_root / "labelstudio_raw"
-        run_root.mkdir(parents=True, exist_ok=True)
-        output = Path(mkdtemp(prefix=f"{source.parent.name}_{source.stem}-", dir=run_root))
+    output = increment_path(args.output.expanduser().resolve())
+    if not args.raw_only:
+        output.relative_to(local_root)
+    output.mkdir(parents=True, exist_ok=False)
     csv_path = output / "raw.csv"
     metadata = {
         "source_video": str(source),

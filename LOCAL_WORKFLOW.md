@@ -86,10 +86,12 @@ Run a two-keypoint model (`front`, then `back`) on every video frame:
 python detect_raw.py /path/to/recording.avi --model /path/to/best.pt
 ```
 
-With no arguments, it uses session `m20/260918/260918_11` and the current
-`runs/pose/headplate_260921/headplate_260921/weights/best.pt` model. Both defaults are at the top of `detect_raw.py`.
+With no arguments, it uses `VIDEO_PATH` and `MODEL_PATH` at the top of `detect_raw.py`.
 
-The script prints a new run directory under `data/labelstudio_raw/`. It saves every returned detection in `raw.csv`,
+The default output is the local project directory `runs/pose/predict_raw/`, regardless of where the input video is stored.
+Repeated runs use `runs/pose/predict_raw-2/`, `runs/pose/predict_raw-3/`, etc.
+Pass `--output runs/pose/another_name` to change the name.
+The script prints the absolute output directory and saves every returned detection in `raw.csv`,
 including bounding boxes, detection confidence, and original keypoint coordinates in image pixels. Multiple detections
 produce multiple rows with the same zero-based `frame`; a missed frame has `detection_count=0`, `detection_index=-1`,
 and empty measurements. Missing keypoint confidence is left empty for models trained with `kpt_shape: [2, 2]`.
@@ -114,8 +116,8 @@ python detect_raw.py /path/to/recording.avi --model /path/to/best.pt \
 python detect_raw.py /path/to/recording.avi --model /path/to/best.pt --raw-only
 
 # Change the selection later without running the model again.
-python ls_predict.py --video /path/to/recording.avi --csv data/labelstudio_raw/RUN/raw.csv \
-  --output data/labelstudio_raw/RUN --bad 150 --ok 100
+python ls_predict.py --video /path/to/recording.avi --csv runs/pose/predict_raw/raw.csv \
+  --output runs/pose/predict_raw --bad 150 --ok 100
 ```
 
 `review.csv` contains one row per frame with its review group, reasons, and selection flag. The exported PNGs are the
@@ -125,7 +127,8 @@ original decoded frames without overlays. Import `label_studio_import.json` for 
 `raw.csv`, and missing or invalid poses have no prelabels.
 
 Enable Label Studio local file serving with `LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true` and set
-`LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT` to the absolute `data` directory. Pass the same directory through
+`LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT` to the absolute project directory containing `runs/` (for example,
+`/home/kai/yolov26`). The imports reference `runs/pose/predict_raw/frames/...` relative to that root. Pass the same directory through
 `--local-files-root` if it differs. Review output must be under that directory. Correct the point labels in Label Studio
 and export the human annotations for the next dataset round; predictions are not human annotations.
 
