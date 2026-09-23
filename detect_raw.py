@@ -114,6 +114,7 @@ def main():
         verbose=False,
     )
     frame_count = detection_count = 0
+    next_progress = 10
     try:
         # Line buffering keeps completed rows readable if inference is interrupted.
         with csv_path.open("x", newline="", buffering=1) as handle:
@@ -146,8 +147,11 @@ def main():
                     writer.writerow(row)
                 frame_count += 1
                 detection_count += len(boxes)
-                if frame_count % 1000 == 0:
-                    print(f"Recorded {frame_count}/{total_frames} frames", flush=True)
+                if total_frames > 0:
+                    progress = min(90, frame_count * 10 // total_frames * 10)
+                    if progress >= next_progress:
+                        print(f"{progress}%: {frame_count}/{total_frames} frames", flush=True)
+                        next_progress = progress + 10
     finally:
         results.close()
         if model.predictor.dataset is not None and model.predictor.dataset.cap is not None:
@@ -156,7 +160,7 @@ def main():
         raise RuntimeError(f"No decodable frames: {source}")
     metadata.update(frames_processed=frame_count, detections=detection_count)
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"Saved {frame_count} frames and {detection_count} detections to {csv_path}")
+    print(f"100%: Saved {frame_count} frames and {detection_count} detections to {csv_path}")
     if not args.raw_only:
         from ls_predict import prepare_review
 

@@ -72,6 +72,7 @@ json_hd = []
 last_pose = [None] * 7
 target_id = None
 first_pose = None
+next_progress = 10
 
 with ExitStack() as cleanup:
     cleanup.callback(video_writer.release)
@@ -82,6 +83,7 @@ with ExitStack() as cleanup:
         imgsz=1024,
         device="mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else None,
         stream=True,
+        verbose=False,
     )
     cleanup.callback(results.close)
     f = cleanup.enter_context(open(csv_path, "w", newline="", buffering=1))
@@ -208,6 +210,11 @@ with ExitStack() as cleanup:
                 cv2.LINE_AA,
             )
         video_writer.write(frame)
+        if total_frames > 0:
+            progress = min(90, (frame_idx + 1) * 10 // total_frames * 10)
+            if progress >= next_progress:
+                print(f"{progress}%: {frame_idx + 1}/{total_frames} frames", flush=True)
+                next_progress = progress + 10
 
 
 if first_pose is None:
@@ -245,4 +252,4 @@ for local_path, remote_path in zip((csv_path, position_path, json_path, output_p
     shutil.copy2(local_path, temporary_path)
     temporary_path.replace(remote_path)
 shutil.rmtree(local_dir)
-print(f"Saved outputs to: {data_dir}")
+print(f"100%: Saved outputs to: {data_dir}")
