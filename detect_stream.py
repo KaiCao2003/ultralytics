@@ -162,7 +162,7 @@ with ExitStack() as cleanup:
             target_id = int(track_ids[best_idx])
             front, back = r.keypoints.xy[best_idx].cpu().numpy()
             center = (front + back) / 2
-            hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
+            hd_deg = np.degrees(np.arctan2(front[0] - back[0], back[1] - front[1])) % 360
             last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
             det_conf = float(confs[best_idx])
 
@@ -194,7 +194,7 @@ with ExitStack() as cleanup:
             theta = np.radians(last_pose[-1])
             start = (round(center_x), round(center_y))
             end = (
-                round(center_x - ARROW_LENGTH * np.sin(theta)),
+                round(center_x + ARROW_LENGTH * np.sin(theta)),
                 round(center_y - ARROW_LENGTH * np.cos(theta)),
             )
             cv2.arrowedLine(frame, start, end, (0, 0, 255), 4, cv2.LINE_AA, tipLength=0.25)

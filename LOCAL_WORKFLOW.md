@@ -70,6 +70,7 @@ It preserves the deployed layout: `<session>/<date>.csv` is the flat tracking ta
 Motive-format table; `data/processed/head_direction.json` contains the existing `hp4.frames` and `hp4.hd` arrays;
 `data/<date>_hd.avi` is the annotated video. Coordinates remain image pixels, not calibrated world coordinates.
 Tracking exports retain the existing gap-filling behavior; use `detect_raw.py` below when selecting new labels.
+Tracking headings increase clockwise from image up: up=0, right=90, down=180, left=270 degrees.
 
 Both CSVs are written incrementally in the printed local staging directory. On interruption, completed rows and the
 closed AVI remain there; an unfinished Motive CSV has an empty `Total Exported Frames` value. Leading rows in that CSV
