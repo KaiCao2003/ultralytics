@@ -102,7 +102,7 @@ an interrupted run has no `frames_processed` entry in `run.json`.
 
 The default inference threshold is `--conf 0.05` to retain weak predictions for review. These are model predictions
 after normal inference filtering, not the network's internal tensors. Use `--conf 0.25` to match the tracking script's
-threshold. Center and heading are derived columns: up = 0, left = 90, down = 180, right = 270 degrees in image coordinates.
+threshold. Center and heading are derived columns: clockwise from image up, up = 0, right = 90, down = 180, left = 270 degrees.
 
 After inference, the same command selects up to 100 suspected bad frames and 100 OK candidates. Bad reasons include
 misses, multiple detections, low confidence, invalid keypoints, and abrupt heading changes between adjacent frames.
