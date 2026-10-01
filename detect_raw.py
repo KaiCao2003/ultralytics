@@ -98,7 +98,7 @@ def main():
         "imgsz": args.imgsz,
         "device": args.device,
         "keypoint_order": ["front", "back"],
-        "heading_convention": "Image pixels: up=0, left=90, down=180, right=270 degrees",
+        "heading_convention": "Image pixels, clockwise: up=0, right=90, down=180, left=270 degrees",
     }
     metadata_path = output / "run.json"
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
@@ -130,7 +130,7 @@ def main():
                     front, back = keypoints[:, :2]
                     center = (front + back) / 2
                     # Derived values never replace the original predicted coordinates.
-                    heading = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
+                    heading = np.degrees(np.arctan2(front[0] - back[0], back[1] - front[1])) % 360
                     row = {
                         **common,
                         "detection_index": index,
