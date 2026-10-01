@@ -30,12 +30,12 @@ date = args.date
 session_dir = args.base_dir / date / f"{date}_{args.session_id}"
 video_path = session_dir / f"{date}.avi"
 data_dir = session_dir / "data"
-# Preserve the Motive export when this session also has a TAK file.
-yolo_csv_name = f"{date}_yolo.csv" if any(session_dir.glob("*.tak")) else f"{date}.csv"
+# Preserve the Motive outputs when this session also has a TAK file.
+yolo_suffix = "_yolo" if any(session_dir.glob("*.tak")) else ""
 remote_paths = [
-    session_dir / yolo_csv_name,
+    session_dir / f"{date}{yolo_suffix}.csv",
     data_dir / f"{date}.csv",
-    data_dir / "processed/head_direction.json",
+    data_dir / "processed" / f"head_direction{yolo_suffix}.json",
     data_dir / f"{date}_hd.avi",
 ]
 
