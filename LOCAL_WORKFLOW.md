@@ -66,8 +66,11 @@ python detect_stream.py '/mnt/senzailab/Kai/#Recording/m20' 260918 11 \
   --model runs/pose/headplate_260921/headplate_260921/weights/best.pt
 ```
 
-Prediction and tracking use YOLO's native `model.track(..., stream=True)` pipeline with its default batching and CPU
-thread settings. The script adds keypoint selection, CSV/JSON exports, and the head-direction arrow video.
+Prediction and tracking use YOLO's native `model.track(..., stream=True)` pipeline. CUDA defaults to `--batch 4
+--quantize 16` for native batched FP16 inference; CPU/MPS retain batch 1 and FP32. Both options are passed directly to
+YOLO. Use `--batch 1 --quantize 32` for the original precision and batching. FP16 can slightly change predicted
+coordinates and confidences. Frame rate, inference resolution, tracker, and CPU thread settings remain unchanged.
+The script adds keypoint selection, CSV/JSON exports, and the head-direction arrow video.
 
 The model may have the legacy front/back pair or four keypoints describing the with-headplate and without-headplate
 pairs. Four-point models select the valid pair with the highest minimum endpoint confidence; `--pair-confidence`

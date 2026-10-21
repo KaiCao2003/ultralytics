@@ -20,17 +20,24 @@ FRONT_MARKER = f"{RIGID_BODY}:front"
 BACK_MARKER = f"{RIGID_BODY}:back"
 ARROW_LENGTH = 80
 
+use_cuda = torch.cuda.is_available()
 parser = argparse.ArgumentParser()
 parser.add_argument("base_dir", type=Path)
 parser.add_argument("date")
 parser.add_argument("session_id", type=int)
 parser.add_argument("--model", type=Path, default=MODEL_PATH)
+parser.add_argument("--batch", type=int, default=4 if use_cuda else 1, help="YOLO inference batch size.")
+parser.add_argument(
+    "--quantize", type=int, choices=(16, 32), default=16 if use_cuda else 32, help="YOLO precision in bits."
+)
 parser.add_argument(
     "--pair-confidence", type=float, default=0.5, help="Minimum confidence of both endpoints for four-point models."
 )
 args = parser.parse_args()
 if not 0 <= args.pair_confidence <= 1:
     parser.error("--pair-confidence must be between 0 and 1")
+if args.batch < 1:
+    parser.error("--batch must be at least 1")
 
 date = args.date
 session_dir = args.base_dir / date / f"{date}_{args.session_id}"
@@ -49,7 +56,7 @@ model = YOLO(args.model)
 validate_pose_model(model)
 
 
-print(f"Processing: {video_path}")
+print(f"Processing: {video_path} (YOLO batch={args.batch}, FP{args.quantize})")
 
 # Keep local outputs available if processing or transfer fails.
 local_dir = Path(mkdtemp(prefix="detect-stream-"))
@@ -91,6 +98,8 @@ with ExitStack() as cleanup:
         source=str(video_path),
         conf=0.25,
         imgsz=1024,
+        batch=args.batch,
+        quantize=args.quantize,
         device="mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else None,
         stream=True,
         verbose=False,
