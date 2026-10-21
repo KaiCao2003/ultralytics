@@ -66,11 +66,8 @@ python detect_stream.py '/mnt/senzailab/Kai/#Recording/m20' 260918 11 \
   --model runs/pose/headplate_260921/headplate_260921/weights/best.pt
 ```
 
-GPU prediction, ordered CPU tracking, and CPU overlay/video encoding run concurrently with bounded frame queues.
-Tracking keeps one continuous history across batches; no frames are skipped. `--batch` controls inference batch size
-(default 4), and `--workers` controls OpenCV's CPU threads (default up to 8). For example, `--batch 8 --workers 32` uses
-larger inference batches and allows OpenCV to use 32 threads. More threads are not always faster; compare total runtime
-on the same recording. Use `--batch 1` when comparing numerical output with the former frame-at-a-time pipeline.
+Prediction and tracking use YOLO's native `model.track(..., stream=True)` pipeline with its default batching and CPU
+thread settings. The script adds keypoint selection, CSV/JSON exports, and the head-direction arrow video.
 
 The model may have the legacy front/back pair or four keypoints describing the with-headplate and without-headplate
 pairs. Four-point models select the valid pair with the highest minimum endpoint confidence; `--pair-confidence`
