@@ -1,8 +1,13 @@
 import argparse
 import csv
 import json
+import os
 import shutil
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from copy import copy
+from itertools import count
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -10,21 +15,87 @@ import cv2
 import numpy as np
 import torch
 
+from pose_keypoints import select_pose_pair, validate_pose_model
 from ultralytics import YOLO
+from ultralytics.trackers.track import on_predict_postprocess_end, on_predict_start
 
-MODEL_PATH = Path(__file__).resolve().parent / "runs/pose/headplate_260921/headplate_260921/weights/best.pt"
+MODEL_PATH = Path(__file__).resolve().parent / "runs/pose/mouse_g3/mouse_g3.1/weights/best.pt"
 
 RIGID_BODY = "hp4"
 FRONT_MARKER = f"{RIGID_BODY}:front"
 BACK_MARKER = f"{RIGID_BODY}:back"
 ARROW_LENGTH = 80
 
+
+def predict_frames(model, video_path, batch):
+    """Keep prediction and its capture on one worker; hand CPU results to the ordered tracker."""
+    tracker = None
+    with ExitStack() as cleanup:
+
+        def prepare(predictor):
+            nonlocal tracker
+            cleanup.callback(predictor.dataset.cap.release)
+            tracker = copy(predictor)
+            on_predict_start(tracker)
+
+        model.add_callback("on_predict_start", prepare)
+        results = model.predict(
+            source=str(video_path),
+            conf=0.25,
+            imgsz=1024,
+            batch=batch,
+            device="mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else None,
+            stream=True,
+            verbose=False,
+        )
+        cleanup.callback(results.close)
+        for result in results:
+            yield tracker, result.cpu()
+
+
+def render_frame(video_writer, image, pose):
+    """Draw and encode in order on the writer's dedicated worker."""
+    frame = image.copy()
+    if pose[-1] is not None:
+        center_x, center_y = pose[:2]
+        theta = np.radians(pose[-1])
+        start = (round(center_x), round(center_y))
+        end = (
+            round(center_x + ARROW_LENGTH * np.sin(theta)),
+            round(center_y - ARROW_LENGTH * np.cos(theta)),
+        )
+        cv2.arrowedLine(frame, start, end, (0, 0, 255), 4, cv2.LINE_AA, tipLength=0.25)
+        cv2.circle(frame, start, 5, (0, 255, 255), -1)
+        cv2.putText(
+            frame,
+            f"{pose[-1]:.1f} deg",
+            (end[0] + 10, end[1] - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    video_writer.write(frame)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("base_dir", type=Path)
 parser.add_argument("date")
 parser.add_argument("session_id", type=int)
 parser.add_argument("--model", type=Path, default=MODEL_PATH)
+parser.add_argument(
+    "--pair-confidence", type=float, default=0.5, help="Minimum confidence of both endpoints for four-point models."
+)
+parser.add_argument("--batch", type=int, default=4, help="GPU inference batch and maximum queued frames per stage.")
+parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1), help="OpenCV CPU threads for tracking.")
 args = parser.parse_args()
+if not 0 <= args.pair_confidence <= 1:
+    parser.error("--pair-confidence must be between 0 and 1")
+if args.batch < 1 or args.workers < 1:
+    parser.error("--batch and --workers must be positive")
+# This standalone pipeline does not use the PyTorch DataLoader that requires single-threaded OpenCV.
+cv2.setNumThreads(args.workers)
 
 date = args.date
 session_dir = args.base_dir / date / f"{date}_{args.session_id}"
@@ -40,6 +111,7 @@ remote_paths = [
 ]
 
 model = YOLO(args.model)
+validate_pose_model(model)
 
 
 print(f"Processing: {video_path}")
@@ -72,22 +144,18 @@ if not video_writer.isOpened():
 json_frames = []
 json_hd = []
 last_pose = [None] * 7
+pose_group = None
 target_id = None
 first_pose = None
 next_progress = 10
 
 with ExitStack() as cleanup:
     cleanup.callback(video_writer.release)
-    model.add_callback("on_predict_start", lambda predictor: cleanup.callback(predictor.dataset.cap.release))
-    results = model.track(
-        source=str(video_path),
-        conf=0.25,
-        imgsz=1024,
-        device="mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else None,
-        stream=True,
-        verbose=False,
-    )
+    results = predict_frames(model, video_path, args.batch)
+    # Join both workers before closing the generator, capture, or video writer.
     cleanup.callback(results.close)
+    inference = cleanup.enter_context(ThreadPoolExecutor(max_workers=1))
+    renderer = cleanup.enter_context(ThreadPoolExecutor(max_workers=1))
     f = cleanup.enter_context(open(csv_path, "w", newline="", buffering=1))
     position_file = cleanup.enter_context(open(position_path, "w", newline="", buffering=1))
     writer = csv.writer(f)
@@ -105,6 +173,10 @@ with ExitStack() as cleanup:
             "hd_deg",
             "track_id",
             "det_conf",
+            "pose_group",
+            "pose_observed",
+            "with_hp_score",
+            "without_hp_score",
         ]
     )
     position_writer.writerows(
@@ -150,25 +222,51 @@ with ExitStack() as cleanup:
             ["Frame", "Time (Seconds)", *["X", "Y", "Z"] * 4],
         ]
     )
-    for frame_idx, r in enumerate(results):
+    pending_frames = deque(inference.submit(next, results, None) for _ in range(args.batch))
+    pending_video = deque()
+    for frame_idx in count():
+        item = pending_frames.popleft().result()
+        if item is None:
+            break
+        pending_frames.append(inference.submit(next, results, None))
+        tracker, r = item
+        tracker.results = [r]
+        on_predict_postprocess_end(tracker)
+        r = tracker.results[0]
         det_conf = np.nan
+        pose_observed = False
+        pair_scores = {}
 
         if len(r.boxes) and r.boxes.id is not None:
-            confs = r.boxes.conf.cpu().numpy()
-            track_ids = r.boxes.id.int().cpu().numpy()
+            confs = r.boxes.conf.numpy()
+            track_ids = r.boxes.id.int().numpy()
 
             best_idx = int(np.argmax(confs))
             if target_id is not None and target_id in track_ids:
                 best_idx = int(np.flatnonzero(track_ids == target_id)[0])
 
             target_id = int(track_ids[best_idx])
-            front, back = r.keypoints.xy[best_idx].cpu().numpy()
-            center = (front + back) / 2
-            hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
-            last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
             det_conf = float(confs[best_idx])
+            group, pair, pair_scores = select_pose_pair(r.keypoints.data[best_idx].numpy(), args.pair_confidence)
+            if pair is not None:
+                front, back = pair[:, :2]
+                center = (front + back) / 2
+                hd_deg = np.degrees(np.arctan2(front[0] - back[0], back[1] - front[1])) % 360
+                last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
+                pose_group, pose_observed = group, True
 
-        writer.writerow([frame_idx, *last_pose, target_id, det_conf])
+        writer.writerow(
+            [
+                frame_idx,
+                *last_pose,
+                target_id,
+                det_conf,
+                pose_group,
+                pose_observed,
+                pair_scores.get("with_hp"),
+                pair_scores.get("without_hp"),
+            ]
+        )
         if last_pose[-1] is not None:
             row = [
                 frame_idx,
@@ -190,33 +288,16 @@ with ExitStack() as cleanup:
         json_frames.append(frame_idx)
         json_hd.append(last_pose[-1])
 
-        frame = r.orig_img.copy()
-        if last_pose[-1] is not None:
-            center_x, center_y = last_pose[:2]
-            theta = np.radians(last_pose[-1])
-            start = (round(center_x), round(center_y))
-            end = (
-                round(center_x - ARROW_LENGTH * np.sin(theta)),
-                round(center_y - ARROW_LENGTH * np.cos(theta)),
-            )
-            cv2.arrowedLine(frame, start, end, (0, 0, 255), 4, cv2.LINE_AA, tipLength=0.25)
-            cv2.circle(frame, start, 5, (0, 255, 255), -1)
-            cv2.putText(
-                frame,
-                f"{last_pose[-1]:.1f} deg",
-                (end[0] + 10, end[1] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-        video_writer.write(frame)
+        pending_video.append(renderer.submit(render_frame, video_writer, r.orig_img, tuple(last_pose)))
+        if len(pending_video) >= args.batch:
+            pending_video.popleft().result()
         if total_frames > 0:
             progress = min(90, (frame_idx + 1) * 10 // total_frames * 10)
             if progress >= next_progress:
                 print(f"{progress}%: {frame_idx + 1}/{total_frames} frames", flush=True)
                 next_progress = progress + 10
+    for future in pending_video:
+        future.result()
 
 
 if first_pose is None:
@@ -231,7 +312,7 @@ with open(position_path, newline="") as source, open(completed_position, "w", ne
     shutil.copyfileobj(source, destination)
 completed_position.replace(position_path)
 
-json_hd = [first_pose[2] if hd is None else hd for hd in json_hd]
+# Keep leading frames without a detected pose null; consumers exclude them from occupancy.
 
 # ----------------------------------------
 # Save compact HD JSON

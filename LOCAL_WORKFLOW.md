@@ -58,13 +58,23 @@ random JPGs and does not create dataset splits.
 
 ## Tracking exports
 
-The deployed recording script takes the recording root, date, and session number. Both detection scripts default to
-the current `headplate_260921` weights; pass `--model` to select a different training run:
+The recording script takes the recording root, date, and session number. `detect_stream.py` defaults to
+`runs/pose/mouse_g3/mouse_g3.1/weights/best.pt`; pass `--model` to select a different training run:
 
 ```bash
 python detect_stream.py '/mnt/senzailab/Kai/#Recording/m20' 260918 11 \
   --model runs/pose/headplate_260921/headplate_260921/weights/best.pt
 ```
+
+GPU prediction, ordered CPU tracking, and CPU overlay/video encoding run concurrently with bounded frame queues.
+Tracking keeps one continuous history across batches; no frames are skipped. `--batch` controls inference batch size
+(default 4), and `--workers` controls OpenCV's CPU threads (default up to 8). For example, `--batch 8 --workers 32` uses
+larger inference batches and allows OpenCV to use 32 threads. More threads are not always faster; compare total runtime
+on the same recording. Use `--batch 1` when comparing numerical output with the former frame-at-a-time pipeline.
+
+The model may have the legacy front/back pair or four keypoints describing the with-headplate and without-headplate
+pairs. Four-point models select the valid pair with the highest minimum endpoint confidence; `--pair-confidence`
+defaults to 0.5. The CSV records which pair was selected and whether the current frame supplied a valid observation.
 
 It preserves the deployed layout: `<session>/<date>.csv` is the flat tracking table; `data/<date>.csv` is the eight-line
 Motive-format table; `data/processed/head_direction.json` contains the existing `hp4.frames` and `hp4.hd` arrays;
