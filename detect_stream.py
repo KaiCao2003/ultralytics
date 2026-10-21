@@ -10,21 +10,34 @@ import cv2
 import numpy as np
 import torch
 
+from pose_keypoints import select_pose_pair, validate_pose_model
 from ultralytics import YOLO
 
-MODEL_PATH = Path(__file__).resolve().parent / "runs/pose/headplate_260921/headplate_260921/weights/best.pt"
+MODEL_PATH = Path(__file__).resolve().parent / "runs/pose/mouse_g3/mouse_g3.1/weights/best.pt"
 
 RIGID_BODY = "hp4"
 FRONT_MARKER = f"{RIGID_BODY}:front"
 BACK_MARKER = f"{RIGID_BODY}:back"
 ARROW_LENGTH = 80
 
+use_cuda = torch.cuda.is_available()
 parser = argparse.ArgumentParser()
 parser.add_argument("base_dir", type=Path)
 parser.add_argument("date")
 parser.add_argument("session_id", type=int)
 parser.add_argument("--model", type=Path, default=MODEL_PATH)
+parser.add_argument("--batch", type=int, default=4 if use_cuda else 1, help="YOLO inference batch size.")
+parser.add_argument(
+    "--quantize", type=int, choices=(16, 32), default=16 if use_cuda else 32, help="YOLO precision in bits."
+)
+parser.add_argument(
+    "--pair-confidence", type=float, default=0.5, help="Minimum confidence of both endpoints for four-point models."
+)
 args = parser.parse_args()
+if not 0 <= args.pair_confidence <= 1:
+    parser.error("--pair-confidence must be between 0 and 1")
+if args.batch < 1:
+    parser.error("--batch must be at least 1")
 
 date = args.date
 session_dir = args.base_dir / date / f"{date}_{args.session_id}"
@@ -40,9 +53,10 @@ remote_paths = [
 ]
 
 model = YOLO(args.model)
+validate_pose_model(model)
 
 
-print(f"Processing: {video_path}")
+print(f"Processing: {video_path} (YOLO batch={args.batch}, FP{args.quantize})")
 
 # Keep local outputs available if processing or transfer fails.
 local_dir = Path(mkdtemp(prefix="detect-stream-"))
@@ -72,6 +86,7 @@ if not video_writer.isOpened():
 json_frames = []
 json_hd = []
 last_pose = [None] * 7
+pose_group = None
 target_id = None
 first_pose = None
 next_progress = 10
@@ -83,6 +98,8 @@ with ExitStack() as cleanup:
         source=str(video_path),
         conf=0.25,
         imgsz=1024,
+        batch=args.batch,
+        quantize=args.quantize,
         device="mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else None,
         stream=True,
         verbose=False,
@@ -105,6 +122,10 @@ with ExitStack() as cleanup:
             "hd_deg",
             "track_id",
             "det_conf",
+            "pose_group",
+            "pose_observed",
+            "with_hp_score",
+            "without_hp_score",
         ]
     )
     position_writer.writerows(
@@ -152,6 +173,8 @@ with ExitStack() as cleanup:
     )
     for frame_idx, r in enumerate(results):
         det_conf = np.nan
+        pose_observed = False
+        pair_scores = {}
 
         if len(r.boxes) and r.boxes.id is not None:
             confs = r.boxes.conf.cpu().numpy()
@@ -162,13 +185,27 @@ with ExitStack() as cleanup:
                 best_idx = int(np.flatnonzero(track_ids == target_id)[0])
 
             target_id = int(track_ids[best_idx])
-            front, back = r.keypoints.xy[best_idx].cpu().numpy()
-            center = (front + back) / 2
-            hd_deg = np.degrees(np.arctan2(back[0] - front[0], back[1] - front[1])) % 360
-            last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
             det_conf = float(confs[best_idx])
+            group, pair, pair_scores = select_pose_pair(r.keypoints.data[best_idx].cpu().numpy(), args.pair_confidence)
+            if pair is not None:
+                front, back = pair[:, :2]
+                center = (front + back) / 2
+                hd_deg = np.degrees(np.arctan2(front[0] - back[0], back[1] - front[1])) % 360
+                last_pose = [float(value) for value in (*center, *front, *back, hd_deg)]
+                pose_group, pose_observed = group, True
 
-        writer.writerow([frame_idx, *last_pose, target_id, det_conf])
+        writer.writerow(
+            [
+                frame_idx,
+                *last_pose,
+                target_id,
+                det_conf,
+                pose_group,
+                pose_observed,
+                pair_scores.get("with_hp"),
+                pair_scores.get("without_hp"),
+            ]
+        )
         if last_pose[-1] is not None:
             row = [
                 frame_idx,
@@ -196,7 +233,7 @@ with ExitStack() as cleanup:
             theta = np.radians(last_pose[-1])
             start = (round(center_x), round(center_y))
             end = (
-                round(center_x - ARROW_LENGTH * np.sin(theta)),
+                round(center_x + ARROW_LENGTH * np.sin(theta)),
                 round(center_y - ARROW_LENGTH * np.cos(theta)),
             )
             cv2.arrowedLine(frame, start, end, (0, 0, 255), 4, cv2.LINE_AA, tipLength=0.25)
@@ -231,7 +268,7 @@ with open(position_path, newline="") as source, open(completed_position, "w", ne
     shutil.copyfileobj(source, destination)
 completed_position.replace(position_path)
 
-json_hd = [first_pose[2] if hd is None else hd for hd in json_hd]
+# Keep leading frames without a detected pose null; consumers exclude them from occupancy.
 
 # ----------------------------------------
 # Save compact HD JSON
